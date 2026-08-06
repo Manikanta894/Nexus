@@ -2,15 +2,17 @@ name: Social Automation — Generate & Approve
 
 on:
   schedule:
-    - cron: '0 9 * * *'   # 9:00 AM daily
-    - cron: '0 17 * * *'  # 5:00 PM daily
-  workflow_dispatch:        # manual trigger button
+    - cron: '55 6 * * *'   # 6:55 AM → post at 7:00 AM
+    - cron: '55 9 * * *'   # 9:55 AM → post at 10:00 AM
+    - cron: '55 12 * * *'  # 12:55 PM → post at 1:00 PM
+    - cron: '55 15 * * *'  # 3:55 PM → post at 4:00 PM
+    - cron: '55 18 * * *'  # 6:55 PM → post at 7:00 PM
 
 jobs:
   generate-social:
     runs-on: ubuntu-latest
     steps:
-      - name: Auto-Generate Social Post
+      - name: Auto-Generate Social Post (5 min before scheduled time)
         run: |
           RESP=$(curl -s -X POST "${{ secrets.APP_URL }}/api/social/generate" \
             -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
@@ -27,9 +29,20 @@ jobs:
           fi
         id: generate
 
-      - name: Notify Discord (optional)
+      - name: Schedule Post for Exact Time
+        if: success()
+        run: |
+          # Schedule for the next hour mark (e.g., 6:55 → 7:00)
+          TARGET=$(date -d "+5 minutes" --utc +%Y-%m-%dT%H:%M:%SZ)
+          curl -s -X POST "${{ secrets.APP_URL }}/api/social/action" \
+            -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"id\":\"${{ steps.generate.outputs.job_id }}\",\"action\":\"schedule\",\"scheduledAt\":\"$TARGET\"}"
+          echo "📅 Scheduled for $TARGET"
+
+      - name: Notify Discord
         if: success()
         run: |
           curl -s -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
             -H "Content-Type: application/json" \
-            -d "{\"content\":\"📱 New social draft ready for approval: ${{ steps.generate.outputs.job_id }}\"}" || true
+            -d "{\"content\":\"📱 New social post generated — approve in Discord to auto-publish at scheduled time\"}" || true

@@ -2,16 +2,14 @@ name: Blog Automation — Generate
 
 on:
   schedule:
-    - cron: '0 10 * * 1,3,5'  # Mon/Wed/Fri at 10:00 AM
-  workflow_dispatch:
+    - cron: '55 9 * * 1,3,5'  # Mon/Wed/Fri at 9:55 AM → post at 10:00 AM
 
 jobs:
   generate-blog:
     runs-on: ubuntu-latest
     steps:
-      - name: Auto-Generate Blog
+      - name: Auto-Generate Blog (5 min before scheduled time)
         run: |
-          # Pick a random topic from the content pillars
           TOPICS=("AI in business" "Leadership lessons" "HR trends 2026" "Career growth strategies" "Productivity systems" "MBA insights" "Data analytics" "Future of work")
           TOPIC=${TOPICS[$RANDOM % ${#TOPICS[@]}]}
           echo "Topic: $TOPIC"
@@ -23,11 +21,22 @@ jobs:
           JOB_ID=$(echo "$RESP" | jq -r '.job.id')
           if [ "$JOB_ID" != "null" ] && [ "$JOB_ID" != "" ]; then
             echo "✅ Blog draft created: $JOB_ID"
+            echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
           else
             echo "❌ Blog generation failed"
             exit 1
           fi
         id: blog
+
+      - name: Schedule Blog for Exact Time
+        if: success()
+        run: |
+          TARGET=$(date -d "+5 minutes" --utc +%Y-%m-%dT%H:%M:%SZ)
+          curl -s -X POST "${{ secrets.APP_URL }}/api/blog/action" \
+            -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"id\":\"${{ steps.blog.outputs.job_id }}\",\"action\":\"schedule\",\"scheduledAt\":\"$TARGET\"}"
+          echo "📅 Scheduled for $TARGET"
 
       - name: Auto-Generate Newsletter from Blog
         if: success()

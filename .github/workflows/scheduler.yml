@@ -2,8 +2,7 @@ name: Scheduler — Publish Scheduled + News Scan
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Every 30 minutes
-  workflow_dispatch:
+    - cron: '*/5 * * * *'   # Every 5 minutes — catches exact posting times
 
 jobs:
   publish-scheduled:

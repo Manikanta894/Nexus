@@ -2511,7 +2511,7 @@ function LearningView() {
 }
 
 const DEFAULT_AUTOPILOT = {
-  social: { enabled: true, timesPerDay: 2, times: ['09:00', '17:00'], platforms: ['linkedin', 'instagram', 'facebook', 'threads'] },
+  social: { enabled: true, timesPerDay: 5, times: ['07:00', '10:00', '13:00', '16:00', '19:00'], platforms: ['linkedin', 'instagram', 'facebook', 'threads'] },
   blog: { enabled: true, timesPerWeek: 3, days: [1, 3, 5], time: '10:00' },
   news: { enabled: true, intervalMinutes: 60 },
   newsletter: { enabled: true, day: 5, time: '09:00', autoFromBlog: true },

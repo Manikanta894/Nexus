@@ -3,18 +3,6 @@ name: Nexus Daily Automation — Full Pipeline
 on:
   schedule:
     - cron: '0 8 * * *'   # 8:00 AM — full daily run
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: 'Automation mode'
-        required: true
-        default: 'full'
-        type: choice
-        options:
-          - full
-          - social-only
-          - blog-only
-          - news-only
 
 jobs:
   daily-pipeline:
@@ -33,7 +21,7 @@ jobs:
           echo "📤 Publishing scheduled posts..."
           curl -s -X POST "$APP/api/cron" -H "x-cron-token: $CRON" -H "Content-Type: application/json" | jq .
           
-          # Step 2: Auto-generate social post
+          # Step 2: Auto-generate social post (5x/day handled by separate workflow)
           if [ "$MODE" = "full" ] || [ "$MODE" = "social-only" ]; then
             echo "📱 Generating social post..."
             curl -s -X POST "$APP/api/social/generate" \
