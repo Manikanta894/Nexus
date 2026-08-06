@@ -732,6 +732,57 @@ async function runApprovalAction(db, moduleKey, jobId, action, actor, extra = {}
       if (def.coll === 'social_posts') {
         const archive = await driveArchive(db, post.driveFileId)
         if (archive.ok) { update.imageArchived = true; await audit(db, 'drive.archive', actor, { id: jobId, fileId: post.driveFileId }) }
+        // Post to social media platforms
+        try {
+          const { postToLinkedIn, postToFacebook, postToInstagram, postToThreads } = await import('@/lib/social-post')
+          const platforms = post.selectedPlatforms || []
+          const caption = post.platforms?.linkedin?.caption || post.platforms?.instagram?.caption || post.imageName || ''
+          const imageUrl = post.imageUrl || undefined
+          const results = {}
+          // Get credentials
+          const linkedin = await getIntegration(db, 'linkedin')
+          const facebook = await getIntegration(db, 'facebook')
+          const instagram = await getIntegration(db, 'instagram')
+          const threads = await getIntegration(db, 'threads')
+          if (platforms.includes('linkedin') && linkedin?.enabled) {
+            const token = decryptField(linkedin, 'accessToken')
+            const personUrn = decryptField(linkedin, 'personUrn')
+            if (token && personUrn) {
+              const r = await postToLinkedIn({ caption, imageUrl, personUrn, accessToken: token })
+              results.linkedin = r.ok ? 'posted' : `failed: ${r.error}`
+              if (r.ok) await audit(db, 'social.linkedin', actor, { id: jobId })
+            }
+          }
+          if (platforms.includes('facebook') && facebook?.enabled) {
+            const token = decryptField(facebook, 'accessToken')
+            const pageId = decryptField(facebook, 'pageId')
+            if (token && pageId) {
+              const r = await postToFacebook({ caption, imageUrl, pageId, accessToken: token })
+              results.facebook = r.ok ? 'posted' : `failed: ${r.error}`
+              if (r.ok) await audit(db, 'social.facebook', actor, { id: jobId })
+            }
+          }
+          if (platforms.includes('instagram') && instagram?.enabled) {
+            const token = decryptField(instagram, 'accessToken')
+            const igUserId = decryptField(instagram, 'igUserId')
+            if (token && igUserId) {
+              const r = await postToInstagram({ caption, imageUrl, igUserId, accessToken: token })
+              results.instagram = r.ok ? 'posted' : `failed: ${r.error}`
+              if (r.ok) await audit(db, 'social.instagram', actor, { id: jobId })
+            }
+          }
+          if (platforms.includes('threads') && threads?.enabled) {
+            const token = decryptField(threads, 'accessToken')
+            const userId = decryptField(threads, 'userId')
+            if (token && userId) {
+              const r = await postToThreads({ caption, imageUrl, userId, accessToken: token })
+              results.threads = r.ok ? 'posted' : `failed: ${r.error}`
+              if (r.ok) await audit(db, 'social.threads', actor, { id: jobId })
+            }
+          }
+          update.postResults = results
+          await audit(db, 'social.post', actor, { id: jobId, results })
+        } catch (e) { console.error('social post failed:', e.message) }
       }
       await audit(db, `${moduleKey}.publish`, actor, { id: jobId })
     } else if (action === 'reject') {
