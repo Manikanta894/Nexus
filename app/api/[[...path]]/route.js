@@ -13,9 +13,9 @@ let client
 let db
 async function connectToMongo() {
   if (db) return db
+  const uri = process.env.MONGO_URL
+  if (!uri || uri === 'fallback') return null
   try {
-    const uri = process.env.MONGO_URL
-    if (!uri || uri === 'fallback') return null
     client = new MongoClient(uri, { serverSelectionTimeoutMS: 5000 })
     await client.connect()
     db = client.db(process.env.DB_NAME || 'nexus')
@@ -957,13 +957,13 @@ async function handleRoute(request, { params }) {
   const route = `/${path.join('/')}`
   const method = request.method
   let db = null
-  if (process.env.MONGO_URL && process.env.MONGO_URL !== 'fallback') {
-    try {
-      db = await connectToMongo()
-      if (db) { try { await seed(db) } catch {} }
-    } catch (e) {
-      console.warn('MongoDB unavailable:', e.message)
-    }
+  try {
+    db = await connectToMongo()
+  } catch (e) {
+    console.warn('MongoDB unavailable:', e.message)
+  }
+  if (db) {
+    try { await seed(db) } catch {}
   }
   try {
 
