@@ -378,7 +378,7 @@ function DashboardView({ go }) {
         <Panel className="lg:col-span-2 p-5">
           <div className="flex items-center gap-2 mb-4"><Zap className="h-4 w-4 text-violet-400" /><h3 className="font-display font-semibold">System Health Strip</h3></div>
           <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-            {d.systemHealth.map((h) => {
+            {(d.systemHealth || []).map((h) => {
               const Ic = healthIcon[h.name] || Globe
               return (
                 <div key={h.name} className="glass rounded-lg p-3 flex flex-col items-center gap-2">
@@ -1654,7 +1654,7 @@ function CostView() {
       {d.alerts.length > 0 && (
         <Panel className="p-4 border-amber-500/30 glow-amber">
           <h3 className="font-display font-semibold mb-2 flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-amber-400" /> Budget alerts</h3>
-          {d.alerts.map((a) => <div key={a.type + a.id} className={`text-sm ${a.over ? 'text-red-400' : 'text-amber-400'}`}>{a.type === 'provider' ? 'Provider' : 'Module'} <span className="font-metric">{a.id}</span>: ${a.usage.toFixed(4)} of ${a.cap} cap — {a.over ? 'OVER — paused' : 'near cap'}</div>)}
+          {(d.alerts || []).map((a) => <div key={a.type + a.id} className={`text-sm ${a.over ? 'text-red-400' : 'text-amber-400'}`}>{a.type === 'provider' ? 'Provider' : 'Module'} <span className="font-metric">{a.id}</span>: ${a.usage.toFixed(4)} of ${a.cap} cap — {a.over ? 'OVER — paused' : 'near cap'}</div>)}
         </Panel>
       )}
 
@@ -2234,12 +2234,12 @@ function MissionControlView() {
         <TabsContent value="posts" className="pt-6 space-y-6">
           <div className="grid lg:grid-cols-2 gap-6">
             <Panel className="p-5"><h3 className="font-display font-semibold mb-3 flex items-center gap-2"><Star className="h-4 w-4 text-amber-400" /> Best Performers</h3>
-              <div className="space-y-2">{d.best.map((b) => (
+              <div className="space-y-2">{(d.best || []).map((b) => (
                 <div key={b.id} className="flex items-center gap-3 glass rounded-lg p-3"><ScoreRing value={b.score} size={48} /><div className="flex-1 min-w-0"><div className="font-grotesk text-sm truncate">{b.title}</div><div className="text-xs text-muted-foreground">{b.pillar}</div></div></div>
               ))}{!d.best.length && <p className="text-sm text-muted-foreground py-4 text-center">No high-scoring posts yet.</p>}</div>
             </Panel>
             <Panel className="p-5"><h3 className="font-display font-semibold mb-3 flex items-center gap-2"><TrendingUp className="h-4 w-4 text-red-400" /> Needs Attention</h3>
-              <div className="space-y-2">{d.worst.map((w) => (
+              <div className="space-y-2">{(d.worst || []).map((w) => (
                 <div key={w.id} className="flex items-center gap-3 glass rounded-lg p-3"><ScoreRing value={w.score} size={48} /><div className="flex-1 min-w-0"><div className="font-grotesk text-sm truncate">{w.title}</div><div className="text-xs text-muted-foreground">{w.pillar}</div></div></div>
               ))}{!d.worst.length && <p className="text-sm text-muted-foreground py-4 text-center">No underperformers.</p>}</div>
             </Panel>
@@ -2248,7 +2248,7 @@ function MissionControlView() {
 
         <TabsContent value="hashtags" className="pt-6">
           <Panel className="p-5"><h3 className="font-display font-semibold mb-4">Hashtag Intelligence</h3>
-            <div className="flex flex-wrap gap-2">{d.hashtags.map((h) => (
+            <div className="flex flex-wrap gap-2">{(d.hashtags || []).map((h) => (
               <Badge key={h.tag} variant="outline" className="border-blue-500/30 text-blue-400 gap-1.5 px-3 py-1.5"><Hash className="h-3 w-3" />{h.tag}<span className="text-muted-foreground ml-1">×{h.count}</span></Badge>
             ))}{!d.hashtags.length && <p className="text-sm text-muted-foreground">No hashtag data yet.</p>}</div>
           </Panel>
