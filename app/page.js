@@ -35,6 +35,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 // unblocking ping at 500ms if the request hasn't settled; (3) hard-abort at
 // 12s and retry GETs once on a fresh connection.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const safeArr = (v) => Array.isArray(v) ? v : []
 
 const ping = (() => {
   let last = 0
@@ -436,7 +437,7 @@ function SocialView() {
   const [draft, setDraft] = useState('')
   const fileRef = useRef()
 
-  const load = useCallback(() => { api('/social').then((r) => setPosts(r.posts)).catch(() => {}) }, [])
+  const load = useCallback(() => { api('/social').then((r) => setPosts(safeArr(r.posts))).catch(() => {}) }, [])
   useEffect(() => { load() }, [load])
 
   const selectedPlatforms = () => Object.keys(plats).filter((k) => plats[k])
@@ -902,7 +903,7 @@ function AssistantView() {
 // ================================================================== AUDIT
 function AuditView() {
   const [logs, setLogs] = useState([])
-  useEffect(() => { api('/audit').then((r) => setLogs(r.logs)).catch(() => {}) }, [])
+  useEffect(() => { api('/audit').then((r) => setLogs(safeArr(r.logs))).catch(() => {}) }, [])
   const icons = { 'auth.login': Fingerprint, 'social.publish': Send, 'social.generate': Sparkles, 'integration.save': Save, 'integration.test': Play, 'brand.update': Brain }
   return (
     <div className="space-y-6">
@@ -935,7 +936,7 @@ function BlogView() {
   const [pview, setPview] = useState('article')
   const [reviewing, setReviewing] = useState(null)
 
-  const load = useCallback(() => { api('/blog').then((r) => setPosts(r.posts)).catch(() => {}) }, [])
+  const load = useCallback(() => { api('/blog').then((r) => setPosts(safeArr(r.posts))).catch(() => {}) }, [])
   useEffect(() => { load() }, [load])
 
   const generate = async () => {
@@ -1107,7 +1108,7 @@ function NewsView({ go }) {
   const [scanning, setScanning] = useState(false)
   const [filter, setFilter] = useState('All')
 
-  const load = useCallback(() => { api('/news').then((r) => setItems(r.items)).catch(() => {}) }, [])
+  const load = useCallback(() => { api('/news').then((r) => setItems(safeArr(r.items))).catch(() => {}) }, [])
   useEffect(() => { load() }, [load])
 
   const scan = async () => {
@@ -1193,7 +1194,7 @@ function SeasonalView() {
 
   const load = useCallback(() => {
     api('/seasonal/calendar').then((r) => setEvents(r.events)).catch(() => {})
-    api('/seasonal').then((r) => setCampaigns(r.campaigns)).catch(() => {})
+    api('/seasonal').then((r) => setCampaigns(safeArr(r.campaigns))).catch(() => {})
   }, [])
   useEffect(() => { load() }, [load])
 
@@ -1373,7 +1374,7 @@ function RepurposeView() {
 
   const load = useCallback(() => {
     api('/social').then((r) => setPosts(r.posts.filter((p) => p.status === 'Published'))).catch(() => {})
-    api('/repurpose').then((r) => setItems(r.items)).catch(() => {})
+    api('/repurpose').then((r) => setItems(safeArr(r.items))).catch(() => {})
   }, [])
   useEffect(() => { load() }, [load])
 
@@ -1462,7 +1463,7 @@ function EngageView() {
   const [draft, setDraft] = useState(null)
   const [busy, setBusy] = useState(false)
 
-  const load = useCallback(() => { api('/engage').then((r) => setComments(r.comments)).catch(() => {}) }, [])
+  const load = useCallback(() => { api('/engage').then((r) => setComments(safeArr(r.comments))).catch(() => {}) }, [])
   useEffect(() => { load() }, [load])
 
   const find = async () => {
@@ -1547,7 +1548,7 @@ function NewsletterView() {
 
   const load = useCallback(() => {
     api('/newsletter/subscribers').then(setStats).catch(() => {})
-    api('/newsletter/campaigns').then((r) => setCampaigns(r.campaigns)).catch(() => {})
+    api('/newsletter/campaigns').then((r) => setCampaigns(safeArr(r.campaigns))).catch(() => {})
     api('/blog').then((r) => setBlogs(r.posts)).catch(() => {})
   }, [])
   useEffect(() => { load() }, [load])
@@ -1780,7 +1781,7 @@ function CalendarView() {
   const [items, setItems] = useState([])
   const [filter, setFilter] = useState('All')
 
-  const load = useCallback(() => { api('/calendar').then((r) => setItems(r.items)).catch(() => {}) }, [])
+  const load = useCallback(() => { api('/calendar').then((r) => setItems(safeArr(r.items))).catch(() => {}) }, [])
   useEffect(() => { load() }, [load])
 
   const resched = async (it, date) => {
