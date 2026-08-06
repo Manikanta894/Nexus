@@ -715,7 +715,52 @@ async function runApprovalAction(db, moduleKey, jobId, action, actor, extra = {}
       if (post.factcheck?.status === 'Blocked') return { error: 'Blocked by Fact-Check gate', code: 409 }
       update.status = 'Published'; update.publishedAt = now
       if (def.coll === 'blog_posts') {
-        update.publishedUrl = `https://manikantar.in/blog/${post.article?.slug || post.seo?.slug || 'article'}`
+        const slug = post.article?.slug || post.seo?.slug || 'article'
+        update.publishedUrl = `https://insights.manikantar.in/blog/${slug}`
+        // Direct publish to blog
+        try {
+          const article = post.article
+          const title = article?.title || 'Untitled'
+          const mdContent = [
+            `# ${title}`,
+            article?.metaDescription || '',
+            '',
+            (article?.intro || '').replace(/<br\/>/g, '\n'),
+            '',
+            ...(article?.sections?.flatMap(s => [`## ${s.h2}`, ...s.body.map(b => b)]) || []),
+            '',
+            article?.conclusion || '',
+            '',
+            `CTA: ${article?.cta || ''}`,
+          ].join('\n')
+          const excerpt = article?.metaDescription?.slice(0, 200) || title
+          const hashtags = post.seo?.secondaryKeywords?.map(k => `#${k.replace(/\s+/g, '')}`) || []
+          const pillar = post.analysis?.pillar?.toLowerCase() || 'tech'
+          const section = ['ai','tech','business','essays','productivity','career'].includes(pillar) ? pillar : 'tech'
+          const blogBody = {
+            title,
+            content: mdContent,
+            excerpt,
+            section,
+            coverImage: post.imageUrl || undefined,
+            hashtags,
+            status: 'published',
+          }
+          const blogRes = await fetch('https://insights.manikantar.in/api/articles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-secret': 'insights-91e5beef227a1d538e3078869ddcd1c3609ac522327a3ef9' },
+            body: JSON.stringify(blogBody),
+          })
+          const blogData = await blogRes.json().catch(() => ({}))
+          if (blogRes.ok) {
+            update.blogPublished = true
+            update.blogPostId = blogData.id || blogData.slug || 'published'
+            await audit(db, 'blog.published', actor, { id: jobId, url: update.publishedUrl })
+          } else {
+            update.blogPublishError = blogData.message || `HTTP ${blogRes.status}`
+            await audit(db, 'blog.publish_failed', actor, { id: jobId, error: update.blogPublishError })
+          }
+        } catch (e) { console.error('blog publish failed:', e.message) }
         // Auto-generate newsletter from approved blog
         try {
           const brandDoc = await db.collection('brand').findOne({ id: 'brand' })
@@ -723,7 +768,7 @@ async function runApprovalAction(db, moduleKey, jobId, action, actor, extra = {}
           const article = post.article
           const subject = article?.title || 'New from Manikanta'
           const preview = article?.metaDescription?.slice(0, 120) || 'Read my latest insights'
-          const body = `<h1>${article?.title || 'New Article'}</h1><p>${article?.metaDescription || ''}</p><article>${(article?.intro || '').replace(/\n/g, '<br/>')}</article><p><a href="${update.publishedUrl}">Read the full article on manikantar.in →</a></p><p><em>${brand?.tagline || ''}</em></p>`
+          const body = `<h1>${article?.title || 'New Article'}</h1><p>${article?.metaDescription || ''}</p><article>${(article?.intro || '').replace(/\n/g, '<br/>')}</article><p><a href="${update.publishedUrl}">Read the full article on insights.manikantar.in →</a></p><p><em>${brand?.tagline || ''}</em></p>`
           await db.collection('newsletter_campaigns').insertOne({ id: uuidv4(), subject, preview, body, template: 'Blog Announcement', blogId: jobId, status: 'Draft', stats: { sent: 0, opens: 0, clicks: 0 }, createdAt: now, updatedAt: now })
           await audit(db, 'newsletter.auto_generated', actor, { blogId: jobId })
         } catch (e) { console.error('auto-newsletter failed:', e.message) }
@@ -1900,12 +1945,27 @@ async function handleRoute(request, { params }) {
           await audit(db, 'cron.publish', 'system', { id: post.id, module: 'social' })
           summary.published++
         }
-        // Blog scheduled posts too
+        // Blog scheduled posts too — direct publish
         const dueBlogs = await db.collection('blog_posts').find({ status: 'Scheduled', scheduledAt: { $lte: now } }).toArray()
         for (const post of dueBlogs) {
-          const url = `https://manikantar.in/blog/${post.article?.slug || 'article'}`
-          await db.collection('blog_posts').updateOne({ id: post.id }, { $set: { status: 'Published', publishedAt: now, publishedUrl: url, updatedAt: now } })
-          await syncToSheets(db, 'blog_posts', { ...post, status: 'Published', publishedAt: now })
+          const slug = post.article?.slug || post.seo?.slug || 'article'
+          const url = `https://insights.manikantar.in/blog/${slug}`
+          const update = { status: 'Published', publishedAt: now, publishedUrl: url, updatedAt: now }
+          // Direct publish to blog
+          try {
+            const article = post.article
+            const title = article?.title || 'Untitled'
+            const mdContent = [`# ${title}`, article?.metaDescription || '', '', (article?.intro || '').replace(/<br\/>/g, '\n'), '', ...(article?.sections?.flatMap(s => [`## ${s.h2}`, ...s.body.map(b => b)]) || []), '', article?.conclusion || '', '', `CTA: ${article?.cta || ''}`].join('\n')
+            const blogRes = await fetch('https://insights.manikantar.in/api/articles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-api-secret': 'insights-91e5beef227a1d538e3078869ddcd1c3609ac522327a3ef9' },
+              body: JSON.stringify({ title, content: mdContent, excerpt: article?.metaDescription?.slice(0, 200) || title, section: ['ai','tech','business','essays','productivity','career'].includes((post.analysis?.pillar?.toLowerCase() || 'tech')) ? post.analysis.pillar.toLowerCase() : 'tech', coverImage: post.imageUrl || undefined, hashtags: post.seo?.secondaryKeywords?.map(k => `#${k.replace(/\s+/g, '')}`) || [], status: 'published' }),
+            })
+            if (blogRes.ok) { update.blogPublished = true; await audit(db, 'blog.published', 'system', { id: post.id }) }
+            else { update.blogPublishError = `HTTP ${blogRes.status}` }
+          } catch (e) { update.blogPublishError = e.message }
+          await db.collection('blog_posts').updateOne({ id: post.id }, { $set: update })
+          await syncToSheets(db, 'blog_posts', { ...post, ...update })
           await audit(db, 'cron.publish', 'system', { id: post.id, module: 'blog' })
           summary.published++
         }
