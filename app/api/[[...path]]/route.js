@@ -954,10 +954,15 @@ async function handleRoute(request, { params }) {
   let db = null
   try {
     db = await connectToMongo()
-    if (db) await seed(db)
+  } catch (e) {
+    console.warn('MongoDB unavailable:', e.message)
+  }
+  if (db) {
+    try { await seed(db) } catch {}
+  }
 
-    // ---- Public (works without DB) ----
-    if (route === '/' || route === '/root') return json({ message: 'NEXUS API online', db: db ? 'connected' : 'disconnected' })
+  // ---- Public (works without DB) ----
+  if (route === '/' || route === '/root') return json({ message: 'NEXUS API online', db: db ? 'connected' : 'disconnected' })
 
     if (route === '/auth/login' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
