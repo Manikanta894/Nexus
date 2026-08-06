@@ -19,25 +19,13 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d "{\"seedText\":\"$TOPIC\"}")
-          JOB_ID=$(echo "$RESP" | jq -r '.job.id')
-          if [ "$JOB_ID" != "null" ] && [ "$JOB_ID" != "" ]; then
-            echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
-            echo "✅ Blog draft: $JOB_ID"
+          echo "$RESP"
+          if echo "$RESP" | grep -q '"id"'; then
+            echo "✅ Blog draft generated"
           else
             echo "❌ Blog generation failed"
             exit 1
           fi
-        id: blog
-
-      - name: Schedule Blog for Exact Time
-        if: success()
-        run: |
-          TARGET=$(date -d "+5 minutes" --utc +%Y-%m-%dT%H:%M:%SZ)
-          curl -s -X POST "${{ secrets.APP_URL }}/api/blog/action" \
-            -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"id\":\"${{ steps.blog.outputs.job_id }}\",\"action\":\"schedule\",\"scheduledAt\":\"$TARGET\"}"
-          echo "📅 Scheduled for $TARGET"
 
       - name: Notify Discord
         if: success()

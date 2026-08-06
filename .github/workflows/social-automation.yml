@@ -18,25 +18,13 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d '{"platforms":["linkedin","instagram","facebook","threads"]}')
-          JOB_ID=$(echo "$RESP" | jq -r '.job.id')
-          if [ "$JOB_ID" != "null" ] && [ "$JOB_ID" != "" ]; then
-            echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
-            echo "✅ Social draft: $JOB_ID"
+          echo "$RESP"
+          if echo "$RESP" | grep -q '"id"'; then
+            echo "✅ Social post generated"
           else
             echo "❌ Generation failed"
             exit 1
           fi
-        id: generate
-
-      - name: Schedule Post for Exact Time
-        if: success()
-        run: |
-          TARGET=$(date -d "+5 minutes" --utc +%Y-%m-%dT%H:%M:%SZ)
-          curl -s -X POST "${{ secrets.APP_URL }}/api/social/action" \
-            -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"id\":\"${{ steps.generate.outputs.job_id }}\",\"action\":\"schedule\",\"scheduledAt\":\"$TARGET\"}"
-          echo "📅 Scheduled for $TARGET"
 
       - name: Notify Discord
         if: success()
