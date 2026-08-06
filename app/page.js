@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import {
@@ -2672,7 +2672,7 @@ function Shell({ user, onLogout }) {
         <main className="flex-1 p-4 md:p-6 overflow-x-hidden">
           <AnimatePresence mode="wait">
             <motion.div key={view} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
-              {render()}
+              <ErrorBoundary key={view}>{render()}</ErrorBoundary>
             </motion.div>
           </AnimatePresence>
         </main>
@@ -2680,6 +2680,28 @@ function Shell({ user, onLogout }) {
       <Copilot go={go} />
     </div>
   )
+}
+
+// ================================================================== Error Boundary
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null } }
+  static getDerivedStateFromError(error) { return { hasError: true, error } }
+  componentDidCatch(error, info) { console.error('View Error:', error, info) }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen grid place-items-center p-8">
+          <div className="glass rounded-xl p-8 max-w-md text-center">
+            <div className="h-12 w-12 rounded-lg bg-red-500/20 grid place-items-center mx-auto mb-4"><ShieldAlert className="h-6 w-6 text-red-400" /></div>
+            <h2 className="font-display text-xl font-bold mb-2">Something went wrong</h2>
+            <p className="text-sm text-muted-foreground mb-4">{String(this.state.error?.message || 'An error occurred')}</p>
+            <Button onClick={() => { this.setState({ hasError: false }); window.location.reload() }} className="bg-blue-600 hover:bg-blue-500">Reload Page</Button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 // ================================================================== ROOT
