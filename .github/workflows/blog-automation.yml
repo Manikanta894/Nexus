@@ -1,4 +1,4 @@
-name: Blog Automation — Generate
+name: Blog Automation — 3x Daily
 
 on:
   schedule:
@@ -10,20 +10,19 @@ jobs:
   generate-blog:
     runs-on: ubuntu-latest
     steps:
-      - name: Auto-Generate Blog (5 min before scheduled time)
+      - name: Auto-Generate Blog
         run: |
-          TOPICS=("AI in business" "Leadership lessons" "HR trends 2026" "Career growth strategies" "Productivity systems" "MBA insights" "Data analytics" "Future of work")
+          TOPICS=("AI in business" "Leadership lessons" "HR trends 2026" "Career growth" "Productivity systems" "MBA insights" "Data analytics" "Future of work")
           TOPIC=${TOPICS[$RANDOM % ${#TOPICS[@]}]}
           echo "Topic: $TOPIC"
           RESP=$(curl -s -X POST "${{ secrets.APP_URL }}/api/blog/generate" \
             -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d "{\"seedText\":\"$TOPIC\"}")
-          echo "RESP=$RESP"
           JOB_ID=$(echo "$RESP" | jq -r '.job.id')
           if [ "$JOB_ID" != "null" ] && [ "$JOB_ID" != "" ]; then
-            echo "✅ Blog draft created: $JOB_ID"
             echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
+            echo "✅ Blog draft: $JOB_ID"
           else
             echo "❌ Blog generation failed"
             exit 1
@@ -40,10 +39,9 @@ jobs:
             -d "{\"id\":\"${{ steps.blog.outputs.job_id }}\",\"action\":\"schedule\",\"scheduledAt\":\"$TARGET\"}"
           echo "📅 Scheduled for $TARGET"
 
-      - name: Auto-Generate Newsletter from Blog
+      - name: Notify Discord
         if: success()
         run: |
-          curl -s -X POST "${{ secrets.APP_URL }}/api/newsletter/generate" \
-            -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
+          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
             -H "Content-Type: application/json" \
-            -d "{\"blogId\":\"${{ steps.blog.outputs.job_id }}\"}" || true
+            -d "{\"content\":\"📝 New blog generated — approve in Discord to auto-publish\"}" || true

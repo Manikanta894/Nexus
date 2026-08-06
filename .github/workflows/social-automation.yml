@@ -1,4 +1,4 @@
-name: Social Automation — Generate & Approve
+name: Social Automation — 5x Daily
 
 on:
   schedule:
@@ -12,17 +12,16 @@ jobs:
   generate-social:
     runs-on: ubuntu-latest
     steps:
-      - name: Auto-Generate Social Post (5 min before scheduled time)
+      - name: Auto-Generate Social Post
         run: |
           RESP=$(curl -s -X POST "${{ secrets.APP_URL }}/api/social/generate" \
             -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d '{"platforms":["linkedin","instagram","facebook","threads"]}')
-          echo "RESP=$RESP"
           JOB_ID=$(echo "$RESP" | jq -r '.job.id')
           if [ "$JOB_ID" != "null" ] && [ "$JOB_ID" != "" ]; then
-            echo "✅ Social draft created: $JOB_ID"
             echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
+            echo "✅ Social draft: $JOB_ID"
           else
             echo "❌ Generation failed"
             exit 1
@@ -32,7 +31,6 @@ jobs:
       - name: Schedule Post for Exact Time
         if: success()
         run: |
-          # Schedule for the next hour mark (e.g., 6:55 → 7:00)
           TARGET=$(date -d "+5 minutes" --utc +%Y-%m-%dT%H:%M:%SZ)
           curl -s -X POST "${{ secrets.APP_URL }}/api/social/action" \
             -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
@@ -45,4 +43,4 @@ jobs:
         run: |
           curl -s -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
             -H "Content-Type: application/json" \
-            -d "{\"content\":\"📱 New social post generated — approve in Discord to auto-publish at scheduled time\"}" || true
+            -d "{\"content\":\"📱 New social post generated — approve in Discord to auto-publish\"}" || true

@@ -3,7 +3,6 @@ name: LinkedIn Engagement + News Radar Auto-Post
 on:
   schedule:
     - cron: '0 */2 * * *'   # Every 2 hours
-  workflow_dispatch:
 
 jobs:
   linkedin-engage:
@@ -13,8 +12,6 @@ jobs:
         run: |
           APP="${{ secrets.APP_URL }}"
           TOKEN="${{ secrets.NEXUS_API_TOKEN }}"
-          
-          # Find relevant posts across topics
           for TOPIC in "AI" "Leadership" "HR" "Business Analytics" "MBA" "Productivity"; do
             echo "🔍 Finding posts about: $TOPIC"
             CANDIDATES=$(curl -s "$APP/api/engage/find?topic=$TOPIC" -H "Authorization: Bearer $TOKEN")
@@ -23,7 +20,6 @@ jobs:
               AUTHOR=$(echo "$DATA" | jq -r '.author')
               TEXT=$(echo "$DATA" | jq -r '.text')
               LINK=$(echo "$DATA" | jq -r '.link')
-              echo "  Drafting comment for: $AUTHOR"
               curl -s -X POST "$APP/api/engage/comment" \
                 -H "Authorization: Bearer $TOKEN" \
                 -H "Content-Type: application/json" \
@@ -46,15 +42,11 @@ jobs:
         run: |
           APP="${{ secrets.APP_URL }}"
           TOKEN="${{ secrets.NEXUS_API_TOKEN }}"
-          
-          # Get pending news opportunities
           NEWS=$(curl -s "$APP/api/news" -H "Authorization: Bearer $TOKEN")
           echo "$NEWS" | jq -r '.items[] | select(.status == "Pending") | @base64' | head -3 | while read -r item; do
             DATA=$(echo "$item" | base64 -d)
             ID=$(echo "$DATA" | jq -r '.id')
             HEADLINE=$(echo "$DATA" | jq -r '.headline')
-            SCORE=$(echo "$DATA" | jq -r '.score.overall')
-            echo "📰 Generating social for: $HEADLINE (score: $SCORE)"
             curl -s -X POST "$APP/api/news/action" \
               -H "Authorization: Bearer $TOKEN" \
               -H "Content-Type: application/json" \
@@ -65,14 +57,10 @@ jobs:
         run: |
           APP="${{ secrets.APP_URL }}"
           TOKEN="${{ secrets.NEXUS_API_TOKEN }}"
-          
-          # Get pending news and generate blogs for highest scored
           NEWS=$(curl -s "$APP/api/news" -H "Authorization: Bearer $TOKEN")
           echo "$NEWS" | jq -r '.items[] | select(.status == "Pending") | @base64' | head -1 | while read -r item; do
             DATA=$(echo "$item" | base64 -d)
             ID=$(echo "$DATA" | jq -r '.id')
-            HEADLINE=$(echo "$DATA" | jq -r '.headline')
-            echo "📝 Generating blog for: $HEADLINE"
             curl -s -X POST "$APP/api/news/action" \
               -H "Authorization: Bearer $TOKEN" \
               -H "Content-Type: application/json" \
