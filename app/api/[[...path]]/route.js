@@ -5,6 +5,30 @@ import { v4 as uuidv4 } from 'uuid'
 const SECRET = process.env.APP_SECRET || 'dev-fallback'
 const json = (data, status = 200) => NextResponse.json(data, { status })
 
+// Integration catalog
+const CATALOG = [
+  { id: 'nvidia', name: 'NVIDIA NIM', category: 'ai', chain: true, docs: 'build.nvidia.com', desc: 'Vision + text. Primary in the AI fallback chain.', fields: [{ key: 'apiKey', label: 'API Key', secret: true }, { key: 'visionModel', label: 'Vision Model', default: 'meta/llama-3.2-11b-vision-instruct' }, { key: 'textModel', label: 'Text Model', default: 'meta/llama-3.2-11b-instruct' }] },
+  { id: 'openrouter', name: 'OpenRouter', category: 'ai', chain: true, docs: 'openrouter.ai', desc: 'Gemini / multi-model gateway with vision.', fields: [{ key: 'apiKey', label: 'API Key', secret: true }, { key: 'visionModel', label: 'Vision Model', default: 'google/gemini-2.5-flash' }, { key: 'textModel', label: 'Text Model', default: 'google/gemini-2.5-flash' }] },
+  { id: 'groq', name: 'Groq', category: 'ai', chain: true, docs: 'console.groq.com', desc: 'Ultra-fast inference for text + vision.', fields: [{ key: 'apiKey', label: 'API Key', secret: true }, { key: 'visionModel', label: 'Vision Model', default: 'qwen/qwen3.6-27b' }, { key: 'textModel', label: 'Text Model', default: 'llama-3.3-70b-versatile' }] },
+  { id: 'openai', name: 'OpenAI', category: 'ai', chain: true, docs: 'platform.openai.com', desc: 'Optional last-resort provider.', fields: [{ key: 'apiKey', label: 'API Key', secret: true }, { key: 'visionModel', label: 'Vision Model', default: 'gpt-4o' }, { key: 'textModel', label: 'Text Model', default: 'gpt-4o' }] },
+  { id: 'perplexity', name: 'Perplexity', category: 'research', chain: true, docs: 'perplexity.ai', desc: 'Primary research + live web answers.', fields: [{ key: 'apiKey', label: 'API Key', secret: true }] },
+  { id: 'google_search', name: 'Google Search', category: 'research', chain: true, docs: 'developers.google.com', desc: 'Programmable Search fallback.', fields: [{ key: 'apiKey', label: 'API Key', secret: true }, { key: 'cx', label: 'Search Engine ID' }] },
+  { id: 'newsapi', name: 'News API', category: 'research', chain: true, docs: 'newsapi.org', desc: 'News discovery for the News Radar module.', fields: [{ key: 'apiKey', label: 'API Key', secret: true }] },
+  { id: 'rss', name: 'RSS / Google News', category: 'research', chain: true, docs: 'rss', desc: 'Free RSS feed fallback.', fields: [{ key: 'feeds', label: 'Feed URLs (comma separated)' }] },
+  { id: 'linkedin', name: 'LinkedIn', category: 'publishing', docs: 'linkedin.com/developers', desc: 'Publish posts + engagement. OAuth connect works once you add a LinkedIn app.', fields: [{ key: 'clientId', label: 'OAuth Client ID' }, { key: 'clientSecret', label: 'OAuth Client Secret', secret: true }, { key: 'accessToken', label: 'Access Token', secret: true }, { key: 'refreshToken', label: 'Refresh Token', secret: true }] },
+  { id: 'facebook', name: 'Facebook', category: 'publishing', docs: 'developers.facebook.com', desc: 'Publish to Facebook pages (Meta app powers IG + Threads too).', fields: [{ key: 'clientId', label: 'Meta App ID' }, { key: 'clientSecret', label: 'Meta App Secret', secret: true }, { key: 'accessToken', label: 'Page Access Token', secret: true }, { key: 'pageId', label: 'Page ID' }] },
+  { id: 'instagram', name: 'Instagram', category: 'publishing', docs: 'developers.facebook.com', desc: 'Publish to Instagram business (uses Meta app credentials).', fields: [{ key: 'accessToken', label: 'Access Token', secret: true }, { key: 'igUserId', label: 'IG User ID' }] },
+  { id: 'threads', name: 'Threads', category: 'publishing', docs: 'developers.facebook.com', desc: 'Publish to Threads (uses Meta app credentials).', fields: [{ key: 'accessToken', label: 'Access Token', secret: true }] },
+  { id: 'google_oauth', name: 'Google Sign-In', category: 'google', docs: 'console.cloud.google.com', desc: 'Dashboard OAuth login (defer to production).', fields: [{ key: 'clientId', label: 'Client ID' }, { key: 'clientSecret', label: 'Client Secret', secret: true }] },
+  { id: 'google_sheets', name: 'Google Sheets', category: 'google', docs: 'console.cloud.google.com', desc: 'The single source of truth. Paste service-account JSON.', fields: [{ key: 'serviceAccountJson', label: 'Service Account JSON', secret: true, textarea: true }, { key: 'sheetId', label: 'Spreadsheet ID' }] },
+  { id: 'google_drive', name: 'Google Drive', category: 'google', docs: 'console.cloud.google.com', desc: 'Source + Archive image folders (FIFO + true MOVE).', fields: [{ key: 'sourceFolderId', label: 'Source Folder ID' }, { key: 'archiveFolderId', label: 'Archive Folder ID' }] },
+  { id: 'discord', name: 'Discord', category: 'discord', docs: 'discord.com/developers', desc: 'Approval command center: approval webhook + button interactions.', fields: [{ key: 'botToken', label: 'Bot Token', secret: true }, { key: 'publicKey', label: 'Bot Public Key' }, { key: 'ownerId', label: 'Your Discord User ID (button lock)' }, { key: 'guildId', label: 'Guild ID' }, { key: 'webhookUrl', label: 'Approval Webhook URL', secret: true }] },
+  { id: 'resend', name: 'Resend', category: 'email', docs: 'resend.com', desc: 'Newsletter + transactional email.', fields: [{ key: 'apiKey', label: 'API Key', secret: true }, { key: 'fromEmail', label: 'From Email' }] },
+  { id: 'google_analytics', name: 'Google Analytics', category: 'analytics', docs: 'analytics.google.com', desc: 'Website + blog traffic.', fields: [{ key: 'measurementId', label: 'Measurement ID' }, { key: 'apiSecret', label: 'API Secret', secret: true }] },
+  { id: 'clarity', name: 'Microsoft Clarity', category: 'analytics', docs: 'clarity.microsoft.com', desc: 'Heatmaps + session insights.', fields: [{ key: 'projectId', label: 'Project ID' }] },
+  { id: 'meta_pixel', name: 'Meta Pixel', category: 'analytics', docs: 'business.facebook.com', desc: 'Conversion tracking.', fields: [{ key: 'pixelId', label: 'Pixel ID' }] },
+]
+
 function signToken(payload) {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
   const sig = crypto.createHmac('sha256', SECRET).update(body).digest('base64url')
@@ -288,7 +312,23 @@ async function handle(request) {
   if (route === '/audit') return json({ logs: db.audit.slice(-50).reverse() })
   if (route === '/cron') return json({ jobs: db.social_posts.filter(p => p.status === 'Scheduled').map(p => ({ id: p.id, module: 'social', label: p.imageName, status: 'Scheduled', nextRun: p.scheduledAt })), logs: db.audit.filter(a => a.action === 'cron.run').slice(-10) })
   if (route === '/connections') return json({ linkedin: { connected: !!db.integrations.find(i => i.id === 'linkedin') }, facebook: { connected: !!db.integrations.find(i => i.id === 'facebook') } })
-  if (route === '/integrations') return json({ integrations: db.integrations, dependencyMap: [{ module: 'Social Automation', apis: ['nvidia', 'openrouter', 'google_drive', 'google_sheets', 'discord', 'linkedin', 'instagram', 'facebook', 'threads'] }] })
+  if (route === '/integrations') {
+    const saved = {}
+    for (const i of db.integrations) saved[i.id] = i
+    const integrations = CATALOG.map(c => {
+      const s = saved[c.id] || {}
+      const fields = {}
+      let configured = false
+      for (const f of c.fields) {
+        const raw = s.fields?.[f.key]
+        const has = raw !== undefined && raw !== null && String(raw) !== ''
+        if (has) configured = true
+        fields[f.key] = f.secret ? (has ? '•••••••• (saved)' : '') : (raw || '')
+      }
+      return { ...c, enabled: s.enabled !== false, configured, values: fields, status: configured ? 'connected' : 'disabled', role: s.role, priority: s.priority, lastTest: s.lastTest, lastTestedAt: s.lastTestedAt, lastLatencyMs: s.lastLatencyMs }
+    })
+    return json({ integrations, dependencyMap: [{ module: 'Social Automation', apis: ['nvidia', 'openrouter', 'google_drive', 'google_sheets', 'discord', 'linkedin', 'instagram', 'facebook', 'threads'] }, { module: 'Blog Engine', apis: ['nvidia', 'openrouter', 'groq', 'google_drive', 'google_sheets'] }, { module: 'News Radar', apis: ['perplexity', 'google_search', 'newsapi', 'rss'] }, { module: 'Newsletter', apis: ['resend'] }, { module: 'Analytics', apis: ['google_analytics', 'clarity', 'meta_pixel'] }] })
+  }
   if (route === '/versions') return json({ versions: [] })
   if (route === '/discord') return json({ webhook: !!db.integrations.find(i => i.id === 'discord'), publicKey: false, interactionCount: 0, interactions: [] })
   if (route === '/newsletter/subscribers') return json({ total: db.newsletter_subscribers.length, active: db.newsletter_subscribers.filter(s => s.status === 'Active').length, newThisWeek: 0, unsubscribed: 0 })
