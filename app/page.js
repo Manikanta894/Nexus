@@ -663,7 +663,7 @@ function IntegrationsView() {
   const load = useCallback(() => { api('/integrations').then(setData).catch(() => {}) }, [])
   useEffect(() => { load() }, [load])
 
-  const open = (it) => { setActive(it); const f = {}; it.fieldsDef.forEach((fd) => { f[fd.key] = fd.secret ? '' : (it.values[fd.key] || '') }); setForm(f) }
+  const open = (it) => { setActive(it); const f = {}; (it.fields || []).forEach((fd) => { f[fd.key] = fd.secret ? '' : (it.values[fd.key] || '') }); setForm(f) }
   const save = async () => {
     setBusy(true)
     try { await api('/integrations/save', { method: 'POST', body: JSON.stringify({ id: active.id, fields: form, enabled: true }) }); toast.success(`${active.name} saved (encrypted)`); setActive(null); load() }
@@ -728,11 +728,11 @@ function IntegrationsView() {
         <h3 className="font-display font-semibold mb-1 flex items-center gap-2"><Layers className="h-4 w-4 text-violet-400" /> Automation Dependency Map</h3>
         <p className="text-xs text-muted-foreground mb-4">Which APIs each module depends on — a single failure shows its full blast radius.</p>
         <div className="space-y-2">
-          {data.dependencyMap.map((m) => (
+          {data(d.dependencyMap || []).map((m) => (
             <div key={m.module} className="flex flex-wrap items-center gap-2 glass rounded-lg p-3">
               <span className="font-grotesk text-sm w-44 shrink-0">{m.module}</span>
               <div className="flex flex-wrap gap-1.5">
-                {m.apis.map((a) => {
+                {m(m.apis || []).map((a) => {
                   const it = data.integrations.find((x) => x.id === a)
                   return <Badge key={a} variant="outline" className="border-white/10 text-[10px] gap-1"><StatusDot status={it?.status || 'disabled'} /> {it?.name || a}</Badge>
                 })}
@@ -747,7 +747,7 @@ function IntegrationsView() {
           <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Lock className="h-4 w-4 text-blue-400" /> {active?.name}</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground">{active?.desc} · docs: <span className="text-blue-400">{active?.docs}</span></p>
           <div className="space-y-3 py-2">
-            {active?.fieldsDef.map((fd) => (
+            {(active?.fields || []).map((fd) => (
               <div key={fd.key} className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">{fd.label}{fd.secret && <Lock className="h-3 w-3 inline ml-1" />}</Label>
                 {fd.textarea ? (
