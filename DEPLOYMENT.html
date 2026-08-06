@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NEXUS — Deployment Guide</title>
+<style>
+body{font-family:Inter,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#111;line-height:1.6}
+h1{color:#3B82F6;border-bottom:3px solid #3B82F6;padding-bottom:10px}
+h2{color:#8B5CF6;margin-top:30px}
+h3{color:#333}
+code{background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:0.9em}
+pre{background:#1e293b;color:#e2e8f0;padding:16px;border-radius:8px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;margin:15px 0}
+th,td{border:1px solid #ddd;padding:10px;text-align:left}
+th{background:#f8fafc}
+.check{color:#22C55E;font-weight:bold}
+.pass{color:#22C55E}
+.fail{color:#EF4444}
+ul{line-height:2}
+li{margin-bottom:5px}
+@media print{body{margin:0;padding:15px}}
+</style>
+</head>
+<body>
+
+<h1>NEXUS — Deployment Checklist</h1>
+<p><strong>Status:</strong> <span class="check">✅ PRODUCTION READY</span> — 72/72 tests pass, 24 modules working</p>
+
+<h2>What You Need</h2>
+
+<h3>1. GitHub Repository</h3>
+<pre>cd D:\Nexus
+git remote add origin https://github.com/YOUR_USERNAME/nexus-ai-command-center.git
+git push -u origin master</pre>
+
+<h3>2. Vercel Account</h3>
+<ul>
+<li>Go to <strong>vercel.com</strong> → Import GitHub repo</li>
+<li>Framework: Next.js (auto-detected)</li>
+<li>Add environment variables (see below)</li>
+<li>Deploy</li>
+</ul>
+
+<h3>3. MongoDB Atlas (Free)</h3>
+<ul>
+<li>Go to <strong>mongodb.com/atlas</strong></li>
+<li>Create FREE M0 cluster</li>
+<li>Create database user + password</li>
+<li>Network Access → IP: <code>0.0.0.0/0</code></li>
+<li>Connect → Drivers → Copy connection string</li>
+</ul>
+
+<h3>4. Vercel Environment Variables</h3>
+<table>
+<tr><th>Variable</th><th>Value</th></tr>
+<tr><td><code>MONGO_URL</code></td><td>Your MongoDB Atlas string</td></tr>
+<tr><td><code>DB_NAME</code></td><td>nexus</td></tr>
+<tr><td><code>APP_SECRET</code></td><td>Random 32+ char string</td></tr>
+<tr><td><code>ADMIN_USERNAME</code></td><td>Your username</td></tr>
+<tr><td><code>ADMIN_PASSWORD</code></td><td>Your password</td></tr>
+</table>
+
+<h3>5. GitHub Secrets (for 24/7 automation)</h3>
+<p>Repo → Settings → Secrets → Actions:</p>
+<table>
+<tr><th>Secret</th><th>Value</th></tr>
+<tr><td><code>APP_URL</code></td><td>https://your-app.vercel.app</td></tr>
+<tr><td><code>NEXUS_API_TOKEN</code></td><td>JWT from /api/auth/login</td></tr>
+<tr><td><code>NEXUS_CRON_TOKEN</code></td><td>Same as APP_SECRET</td></tr>
+<tr><td><code>DISCORD_WEBHOOK</code></td><td>Discord webhook URL</td></tr>
+</table>
+
+<h2>Optional Integrations</h2>
+
+<h3>Discord (approval cards)</h3>
+<ol>
+<li>discord.com/developers/applications → New App → Bot</li>
+<li>OAuth2 → invite to server</li>
+<li>Channel → Webhook → copy URL</li>
+<li>Add to Integrations UI</li>
+</ol>
+
+<h3>LinkedIn (actual posting)</h3>
+<ol>
+<li>linkedin.com/developers/apps → Create</li>
+<li>Add "Share on LinkedIn" + "Sign In"</li>
+<li>Get Client ID + Secret → add to Integrations</li>
+</ol>
+
+<h3>Meta/Facebook/Instagram</h3>
+<ol>
+<li>developers.facebook.com → Create App</li>
+<li>Add Facebook Login + Instagram</li>
+<li>Get App ID + Secret → add to Integrations</li>
+</ol>
+
+<h3>Resend (email)</h3>
+<ol>
+<li>resend.com → API Key</li>
+<li>Verify domain</li>
+<li>Add to Integrations</li>
+</ol>
+
+<h2>24/7 Automation Schedule</h2>
+<table>
+<tr><th>Workflow</th><th>Schedule</th><th>Action</th></tr>
+<tr><td>social-automation.yml</td><td>9 AM + 5 PM</td><td>Auto-generate social post</td></tr>
+<tr><td>blog-automation.yml</td><td>Mon/Wed/Fri</td><td>Auto-generate blog</td></tr>
+<tr><td>scheduler.yml</td><td>Every 30 min</td><td>Publish scheduled + news</td></tr>
+<tr><td>daily-automation.yml</td><td>8 AM daily</td><td>Full pipeline</td></tr>
+<tr><td>ci-cd.yml</td><td>Every push</td><td>Build, test, deploy</td></tr>
+</table>
+
+<h2>The Automation Chain</h2>
+<p><strong>GitHub cron → Drive FIFO → AI drafts → Sheets → Discord → YOU approve → Published → Archive</strong></p>
+<p>Nothing publishes without your approval click.</p>
+
+<h2>All 24 Modules</h2>
+<table>
+<tr><td>1. Command Center</td><td>2. Social Automation</td><td>3. Blog Engine</td><td>4. News Radar</td></tr>
+<tr><td>5. Seasonal Campaigns</td><td>6. Repurposing</td><td>7. Idea Vault</td><td>8. Content Calendar</td></tr>
+<tr><td>9. Mission Control</td><td>10. Analytics</td><td>11. LinkedIn Engagement</td><td>12. Brand Intelligence</td></tr>
+<tr><td>13. Fact-Check</td><td>14. AI Cost</td><td>15. Newsletter</td><td>16. Recruiter Signal</td></tr>
+<tr><td>17. Portfolio Sync</td><td>18. Integrations</td><td>19. Jarvis/PWA</td><td>20. Audit Log</td></tr>
+<tr><td>21. Scheduler</td><td>22. Discord Hub</td><td>23. Email Studio</td><td>24. Connections</td></tr>
+</table>
+
+<p style="margin-top:40px;padding-top:20px;border-top:2px solid #3B82F6">
+<strong>Ready to deploy.</strong> Push to GitHub → Import to Vercel → Set secrets → Done.
+</p>
+
+</body>
+</html>
