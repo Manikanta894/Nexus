@@ -122,8 +122,8 @@ async function handle(request) {
 
   if (route === '/auth/login' && method === 'POST') {
     const body = await request.json().catch(() => ({}))
-    const U = process.env.ADMIN_USERNAME || 'admin'
-    const P = process.env.ADMIN_PASSWORD || 'admin123'
+    const U = 'admin'
+    const P = 'admin123'
     if (body.username === U && body.password === P) {
       const token = signToken({ sub: 'admin', name: 'Manikanta', role: 'owner', exp: Date.now() + 7 * 86400000 })
       return json({ token, user: { name: 'Manikanta', role: 'owner', username: U } })
