@@ -983,10 +983,11 @@ async function handleRoute(request, { params }) {
       return json({ error: 'Invalid credentials' }, 401)
     }
 
-    // ---- Auth gate for everything below ----
-    const user = getAuth(request)
-    if (!user) return json({ error: 'Unauthorized' }, 401)
-    const actor = user.name || 'admin'
+  // ---- Auth gate for everything below ----
+  const user = getAuth(request)
+  if (!user) return json({ error: 'Unauthorized' }, 401)
+  const actor = user.name || 'admin'
+  if (!db) return json({ error: 'Database not available. Set MONGO_URL or wait for MongoDB Atlas to provision.' }, 503)
 
     if (route === '/auth/me' && method === 'GET') return json({ user: { name: user.name, role: user.role } })
 
