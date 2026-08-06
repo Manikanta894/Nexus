@@ -953,12 +953,12 @@ async function handleRoute(request, { params }) {
   const method = request.method
   let db = null
   try {
-    db = await connectToMongo()
+    if (process.env.MONGO_URL && process.env.MONGO_URL !== 'fallback') {
+      db = await connectToMongo()
+      if (db) { try { await seed(db) } catch {} }
+    }
   } catch (e) {
     console.warn('MongoDB unavailable:', e.message)
-  }
-  if (db) {
-    try { await seed(db) } catch {}
   }
 
   // ---- Public (works without DB) ----
