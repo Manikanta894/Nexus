@@ -128,6 +128,7 @@ const NAV = [
   ] },
   { section: 'INTELLIGENCE+', items: [
     { id: 'mission_control', label: 'Mission Control', icon: Activity },
+    { id: 'learning', label: 'Learning Engine', icon: TrendingUp },
     { id: 'versions', label: 'Version History', icon: Layers },
   ] },
   { section: 'AUTOMATION', items: [
@@ -2452,6 +2453,63 @@ function AutopilotView() {
   )
 }
 
+// ================================================================== LEARNING ENGINE
+function LearningView() {
+  const [data, setData] = useState(null)
+  useEffect(() => { api('/learning').then(setData).catch(() => {}) }, [])
+  if (!data) return <Loading />
+
+  return (
+    <div className="space-y-6">
+      <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><TrendingUp className="h-6 w-6 text-emerald-400" /> Learning Engine</h1><p className="text-sm text-muted-foreground">AI-analyzed patterns from your published content — what works, what doesn't, and what to do next.</p></div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard icon={Star} label="Published Posts" value={data.totalPosts || 0} accent="#3B82F6" />
+        <StatCard icon={FileText} label="Published Blogs" value={data.totalBlogs || 0} accent="#8B5CF6" />
+        <StatCard icon={Hash} label="Top Hashtag" value={data.bestHashtags?.[0]?.tag || '—'} accent="#22C55E" />
+        <StatCard icon={Clock} label="Best Time" value={data.bestTimes?.[0]?.time || '—'} accent="#F59E0B" />
+      </div>
+
+      <Panel className="p-5 glow-purple">
+        <div className="flex items-start gap-4">
+          <div className="h-10 w-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-500 to-blue-500 grid place-items-center"><Brain className="h-5 w-5 text-white" /></div>
+          <div><h3 className="font-display font-semibold mb-2">AI Recommendations</h3>
+            <div className="space-y-2">{data.recommendations?.map((r, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm text-muted-foreground"><Check className="h-4 w-4 text-emerald-400 mt-0.5 shrink-0" /><span>{r}</span></div>
+            ))}</div>
+          </div>
+        </div>
+      </Panel>
+
+      <div className="grid lg:grid-cols-2 gap-6">
+        <Panel className="p-5"><h3 className="font-display font-semibold mb-4 flex items-center gap-2"><Star className="h-4 w-4 text-amber-400" /> Best Topics</h3>
+          <div className="space-y-3">{data.bestTopics?.map((t) => (
+            <div key={t.pillar} className="flex items-center gap-3"><span className="text-sm w-32 truncate">{t.pillar}</span><div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-violet-500" style={{ width: `${t.avgScore}%` }} /></div><span className="font-metric text-xs w-12 text-right">{t.avgScore}</span></div>
+          ))}{!data.bestTopics?.length && <p className="text-sm text-muted-foreground py-4 text-center">No data yet.</p>}</div>
+        </Panel>
+        <Panel className="p-5"><h3 className="font-display font-semibold mb-4 flex items-center gap-2"><TrendingUp className="h-4 w-4 text-emerald-400" /> Best Platforms</h3>
+          <div className="space-y-3">{data.bestPlatforms?.map((p) => (
+            <div key={p.platform} className="flex items-center gap-3"><span className="text-sm w-32 truncate capitalize">{p.platform}</span><div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-blue-500" style={{ width: `${p.avgScore}%` }} /></div><span className="font-metric text-xs w-12 text-right">{p.avgScore}</span></div>
+          ))}{!data.bestPlatforms?.length && <p className="text-sm text-muted-foreground py-4 text-center">No data yet.</p>}</div>
+        </Panel>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-6">
+        <Panel className="p-5"><h3 className="font-display font-semibold mb-4 flex items-center gap-2"><Hash className="h-4 w-4 text-blue-400" /> Hashtag Intelligence</h3>
+          <div className="flex flex-wrap gap-2">{data.bestHashtags?.map((h) => (
+            <Badge key={h.tag} variant="outline" className="border-blue-500/30 text-blue-400 gap-1.5 px-3 py-1.5">{h.tag}<span className="text-muted-foreground ml-1">×{h.count}</span></Badge>
+          ))}{!data.bestHashtags?.length && <p className="text-sm text-muted-foreground">No hashtag data yet.</p>}</div>
+        </Panel>
+        <Panel className="p-5"><h3 className="font-display font-semibold mb-4 flex items-center gap-2"><Zap className="h-4 w-4 text-amber-400" /> Best Hooks</h3>
+          <div className="space-y-2">{data.bestHooks?.map((h) => (
+            <div key={h.hook} className="glass rounded-lg p-3"><p className="text-sm font-grotesk line-clamp-2">{h.hook}</p><div className="text-xs text-muted-foreground mt-1">Avg score: {h.avgScore}/100 · used {h.count}×</div></div>
+          ))}{!data.bestHooks?.length && <p className="text-sm text-muted-foreground py-4 text-center">No hook data yet.</p>}</div>
+        </Panel>
+      </div>
+    </div>
+  )
+}
+
 const DEFAULT_AUTOPILOT = {
   social: { enabled: true, timesPerDay: 2, times: ['09:00', '17:00'], platforms: ['linkedin', 'instagram', 'facebook', 'threads'] },
   blog: { enabled: true, timesPerWeek: 3, days: [1, 3, 5], time: '10:00' },
@@ -2517,6 +2575,7 @@ function Shell({ user, onLogout }) {
       case 'email': return <EmailView />
       case 'connections': return <ConnectionsView />
       case 'mission_control': return <MissionControlView />
+      case 'learning': return <LearningView />
       case 'versions': return <VersionsView />
       case 'autopilot': return <AutopilotView />
       default: return <DashboardView go={go} />

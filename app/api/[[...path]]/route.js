@@ -711,17 +711,30 @@ async function runApprovalAction(db, moduleKey, jobId, action, actor, extra = {}
   if (!post) return { error: 'Not found', code: 404 }
   const now = new Date().toISOString()
   const update = { updatedAt: now }
-  if (action === 'approve') {
-    if (post.factcheck?.status === 'Blocked') return { error: 'Blocked by Fact-Check gate', code: 409 }
-    update.status = 'Published'; update.publishedAt = now
-    if (def.coll === 'blog_posts') update.publishedUrl = `https://manikantar.in/blog/${post.article?.slug || post.seo?.slug || 'article'}`
-    if (def.coll === 'portfolio_case_studies') update.syncStatus = 'Synced'
-    if (def.coll === 'social_posts') {
-      const archive = await driveArchive(db, post.driveFileId)
-      if (archive.ok) { update.imageArchived = true; await audit(db, 'drive.archive', actor, { id: jobId, fileId: post.driveFileId }) }
-    }
-    await audit(db, `${moduleKey}.publish`, actor, { id: jobId })
-  } else if (action === 'reject') {
+    if (action === 'approve') {
+      if (post.factcheck?.status === 'Blocked') return { error: 'Blocked by Fact-Check gate', code: 409 }
+      update.status = 'Published'; update.publishedAt = now
+      if (def.coll === 'blog_posts') {
+        update.publishedUrl = `https://manikantar.in/blog/${post.article?.slug || post.seo?.slug || 'article'}`
+        // Auto-generate newsletter from approved blog
+        try {
+          const brandDoc = await db.collection('brand').findOne({ id: 'brand' })
+          const brand = brandDoc?.data || DEFAULT_BRAND
+          const article = post.article
+          const subject = article?.title || 'New from Manikanta'
+          const preview = article?.metaDescription?.slice(0, 120) || 'Read my latest insights'
+          const body = `<h1>${article?.title || 'New Article'}</h1><p>${article?.metaDescription || ''}</p><article>${(article?.intro || '').replace(/\n/g, '<br/>')}</article><p><a href="${update.publishedUrl}">Read the full article on manikantar.in →</a></p><p><em>${brand?.tagline || ''}</em></p>`
+          await db.collection('newsletter_campaigns').insertOne({ id: uuidv4(), subject, preview, body, template: 'Blog Announcement', blogId: jobId, status: 'Draft', stats: { sent: 0, opens: 0, clicks: 0 }, createdAt: now, updatedAt: now })
+          await audit(db, 'newsletter.auto_generated', actor, { blogId: jobId })
+        } catch (e) { console.error('auto-newsletter failed:', e.message) }
+      }
+      if (def.coll === 'portfolio_case_studies') update.syncStatus = 'Synced'
+      if (def.coll === 'social_posts') {
+        const archive = await driveArchive(db, post.driveFileId)
+        if (archive.ok) { update.imageArchived = true; await audit(db, 'drive.archive', actor, { id: jobId, fileId: post.driveFileId }) }
+      }
+      await audit(db, `${moduleKey}.publish`, actor, { id: jobId })
+    } else if (action === 'reject') {
     update.status = 'Rejected'; await audit(db, `${moduleKey}.reject`, actor, { id: jobId })
   } else if (action === 'skip') {
     update.status = 'Skipped'; await audit(db, `${moduleKey}.skip`, actor, { id: jobId })
@@ -1725,6 +1738,15 @@ async function handleRoute(request, { params }) {
       const jobs = scheduled.map((s) => ({ id: s.id, module: 'social', label: s.imageName || s.seedText || 'Scheduled post', status: 'Scheduled', nextRun: s.scheduledAt, lastRun: null }))
       const logs = await db.collection('audit').find({ action: 'cron.run' }).sort({ ts: -1 }).limit(10).toArray()
       return json({ jobs, logs: logs.map((l) => ({ id: l.id, ts: l.ts, action: l.action, detail: JSON.stringify(l.meta?.summary || {}) })) })
+    }
+
+    // ================= LEARNING ENGINE =================
+    if (route === '/learning' && method === 'GET') {
+      const social = await db.collection('social_posts').find({}).toArray()
+      const blogs = await db.collection('blog_posts').find({}).toArray()
+      const { analyzePerformance } = await import('@/lib/learning')
+      const analysis = analyzePerformance(social, blogs)
+      return json({ ...analysis, totalPosts: social.filter((p) => p.status === 'Published').length, totalBlogs: blogs.filter((b) => b.status === 'Published').length })
     }
 
     // ================= ANALYTICS INTELLIGENCE (full) =================
