@@ -13,12 +13,17 @@ let client
 let db
 async function connectToMongo() {
   if (db) return db
-  const uri = process.env.MONGO_URL
-  if (!uri) return null
-  client = new MongoClient(uri)
-  await client.connect()
-  db = client.db(process.env.DB_NAME || 'nexus')
-  return db
+  try {
+    const uri = process.env.MONGO_URL
+    if (!uri || uri === 'fallback') return null
+    client = new MongoClient(uri, { serverSelectionTimeoutMS: 5000 })
+    await client.connect()
+    db = client.db(process.env.DB_NAME || 'nexus')
+    return db
+  } catch (e) {
+    console.warn('MongoDB connection failed:', e.message)
+    return null
+  }
 }
 
 const SECRET = process.env.APP_SECRET || 'dev-fallback-secret-change-me'
