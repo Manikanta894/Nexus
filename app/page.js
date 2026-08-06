@@ -2317,7 +2317,7 @@ function AutopilotView() {
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
 
-  const load = useCallback(() => { api('/autopilot').then((r) => setCfg(r.config || DEFAULT_AUTOPILOT)).catch(() => {}) }, [])
+  const load = useCallback(() => { api('/autopilot').then((r) => setCfg(r.config || DEFAULT_AUTOPILOT)).catch(() => setCfg(DEFAULT_AUTOPILOT)) }, [])
   useEffect(() => { load() }, [load])
 
   const save = async () => {

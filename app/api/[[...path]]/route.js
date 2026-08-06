@@ -1003,8 +1003,10 @@ async function handleRoute(request, { params }) {
 
     // ---- AUTOPILOT (24/7 automation) ----
     if (route === '/autopilot' && method === 'GET') {
-      const cfg = await db.collection('config').findOne({ key: 'autopilot' })
-      return json({ config: cfg?.data || null, status: { running: true } })
+      try {
+        const cfg = db ? await db.collection('config').findOne({ key: 'autopilot' }) : null
+        return json({ config: cfg?.data || null, status: { running: true } })
+      } catch { return json({ config: null, status: { running: true } }) }
     }
     if (route === '/autopilot' && method === 'PUT') {
       const body = await request.json().catch(() => ({}))
