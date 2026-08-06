@@ -957,14 +957,21 @@ async function handleRoute(request, { params }) {
   const route = `/${path.join('/')}`
   const method = request.method
   let db = null
+  let memMode = false
   try {
     db = await connectToMongo()
   } catch (e) {
     console.warn('MongoDB unavailable:', e.message)
   }
-  if (db) {
-    try { await seed(db) } catch {}
+  if (!db) {
+    // Fallback to in-memory database
+    const { memCollection } = await import('@/lib/memdb')
+    const collNames = ['social_posts','blog_posts','news_opportunities','linkedin_comments','newsletter_campaigns','newsletter_subscribers','integrations','config','audit','brand','assistant','ai_cost','news_seen','drive_locks','seasonal_events','seasonal_campaigns','repurposed_content','idea_vault','portfolio_case_studies']
+    db = {}
+    for (const name of collNames) db[name] = memCollection(name)
+    memMode = true
   }
+  try { await seed(db) } catch {}
   try {
 
   // ---- Public (works without DB) ----
