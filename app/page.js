@@ -2407,6 +2407,24 @@ function AutopilotView() {
         )}
       </Panel>
 
+      {/* LinkedIn Engagement */}
+      <Panel className="p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-display font-semibold flex items-center gap-2"><MessageSquare className="h-4 w-4 text-blue-400" /> LinkedIn Auto-Comment</h3>
+          <Switch checked={cfg.linkedin?.enabled} onCheckedChange={() => toggleModule('linkedin')} />
+        </div>
+        {cfg.linkedin?.enabled && (
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Field label="Comments per day">
+              <input type="number" min="1" max="20" value={cfg.linkedin.commentsPerDay || 5} onChange={(e) => update('linkedin', 'commentsPerDay', Number(e.target.value))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm font-code" />
+            </Field>
+            <Field label="Topics (comma separated)">
+              <input value={(cfg.linkedin.topics || []).join(', ')} onChange={(e) => update('linkedin', 'topics', e.target.value.split(',').map((s) => s.trim()))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm" />
+            </Field>
+          </div>
+        )}
+      </Panel>
+
       {/* News + Newsletter */}
       <div className="grid lg:grid-cols-2 gap-6">
         <Panel className="p-5">
@@ -2415,9 +2433,13 @@ function AutopilotView() {
             <Switch checked={cfg.news?.enabled} onCheckedChange={() => toggleModule('news')} />
           </div>
           {cfg.news?.enabled && (
-            <Field label="Scan interval (minutes)">
-              <input type="number" min="15" step="15" value={cfg.news.intervalMinutes || 60} onChange={(e) => update('news', 'intervalMinutes', Number(e.target.value))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm font-code" />
-            </Field>
+            <div className="space-y-3">
+              <Field label="Scan interval (minutes)">
+                <input type="number" min="15" step="15" value={cfg.news.intervalMinutes || 120} onChange={(e) => update('news', 'intervalMinutes', Number(e.target.value))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm font-code" />
+              </Field>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Check className="h-3 w-3 text-emerald-400" /> Auto-generate social from top news</div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Check className="h-3 w-3 text-emerald-400" /> Auto-generate blog from top news</div>
+            </div>
           )}
         </Panel>
         <Panel className="p-5">
@@ -2512,8 +2534,9 @@ function LearningView() {
 
 const DEFAULT_AUTOPILOT = {
   social: { enabled: true, timesPerDay: 5, times: ['07:00', '10:00', '13:00', '16:00', '19:00'], platforms: ['linkedin', 'instagram', 'facebook', 'threads'] },
-  blog: { enabled: true, timesPerWeek: 3, days: [1, 3, 5], time: '10:00' },
-  news: { enabled: true, intervalMinutes: 60 },
+  blog: { enabled: true, timesPerDay: 3, times: ['09:00', '14:00', '19:00'] },
+  news: { enabled: true, intervalMinutes: 120, autoGenerateSocial: true, autoGenerateBlog: true },
+  linkedin: { enabled: true, commentsPerDay: 5, topics: ['AI', 'Leadership', 'HR', 'Business Analytics', 'MBA'] },
   newsletter: { enabled: true, day: 5, time: '09:00', autoFromBlog: true },
 }
 

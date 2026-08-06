@@ -2,7 +2,9 @@ name: Blog Automation — Generate
 
 on:
   schedule:
-    - cron: '55 9 * * 1,3,5'  # Mon/Wed/Fri at 9:55 AM → post at 10:00 AM
+    - cron: '55 8 * * *'    # 8:55 AM → blog at 9:00 AM
+    - cron: '55 13 * * *'   # 1:55 PM → blog at 2:00 PM
+    - cron: '55 18 * * *'   # 6:55 PM → blog at 7:00 PM
 
 jobs:
   generate-blog:
