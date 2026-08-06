@@ -12,11 +12,23 @@ import { estimateCost, DEFAULT_BUDGET_CAPS } from '@/lib/pricing'
 let client
 let db
 async function connectToMongo() {
-  if (!client) {
-    client = new MongoClient(process.env.MONGO_URL)
-    await client.connect()
-    db = client.db(process.env.DB_NAME)
+  if (db) return db
+  try {
+    if (process.env.MONGO_URL && process.env.MONGO_URL !== 'fallback') {
+      client = new MongoClient(process.env.MONGO_URL)
+      await client.connect()
+      db = client.db(process.env.DB_NAME || 'nexus')
+      return db
+    }
+  } catch (e) {
+    console.warn('MongoDB connection failed, using in-memory:', e.message)
   }
+  // Fallback to in-memory MongoDB
+  const { MongoMemoryServer } = require('mongodb-memory-server')
+  const mem = await MongoMemoryServer.create()
+  client = new MongoClient(mem.getUri())
+  await client.connect()
+  db = client.db('nexus')
   return db
 }
 
