@@ -958,16 +958,17 @@ async function handleRoute(request, { params }) {
   const method = request.method
   let db = null
   try {
-    if (process.env.MONGO_URL && process.env.MONGO_URL !== 'fallback') {
-      db = await connectToMongo()
-      if (db) { try { await seed(db) } catch {} }
-    }
+    db = await connectToMongo()
+    if (db) { try { await seed(db) } catch {} }
   } catch (e) {
     console.warn('MongoDB unavailable:', e.message)
   }
+  try {
 
   // ---- Public (works without DB) ----
-  if (route === '/' || route === '/root') return json({ message: 'NEXUS API online', db: db ? 'connected' : 'disconnected' })
+  if (route === '/' || route === '/root') {
+    return json({ message: 'NEXUS API online', db: db ? 'connected' : 'disconnected', time: new Date().toISOString() })
+  }
 
     if (route === '/auth/login' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
