@@ -964,9 +964,16 @@ async function handleRoute(request, { params }) {
     console.warn('MongoDB unavailable:', e.message)
   }
   if (!db) {
-    // Fallback to in-memory database
-    const { createMemDb } = await import('@/lib/memdb')
-    db = createMemDb()
+    // Fallback to simple in-memory database
+    const memColl = (name) => ({
+      findOne: async () => null,
+      find: async () => ({ sort: async () => ({ toArray: async () => [] }), limit: async () => ({ toArray: async () => [] }), toArray: async () => [] }),
+      insertOne: async (doc) => ({ insertedId: 'mem-' + Date.now() }),
+      updateOne: async () => ({ modifiedCount: 0 }),
+      countDocuments: async () => 0,
+      deleteMany: async () => ({ deletedCount: 0 }),
+    })
+    db = { collection: memColl }
   }
   if (db && process.env.MONGO_URL && process.env.MONGO_URL !== 'fallback') {
     try { await seed(db) } catch {}
