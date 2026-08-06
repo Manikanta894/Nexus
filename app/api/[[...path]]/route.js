@@ -968,7 +968,9 @@ async function handleRoute(request, { params }) {
     const { createMemDb } = await import('@/lib/memdb')
     db = createMemDb()
   }
-  try { await seed(db) } catch {}
+  if (db && process.env.MONGO_URL && process.env.MONGO_URL !== 'fallback') {
+    try { await seed(db) } catch {}
+  }
 
   try {
   // ---- Public (works without DB) ----
