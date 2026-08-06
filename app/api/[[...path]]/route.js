@@ -957,11 +957,13 @@ async function handleRoute(request, { params }) {
   const route = `/${path.join('/')}`
   const method = request.method
   let db = null
-  try {
-    db = await connectToMongo()
-    if (db) { try { await seed(db) } catch {} }
-  } catch (e) {
-    console.warn('MongoDB unavailable:', e.message)
+  if (process.env.MONGO_URL && process.env.MONGO_URL !== 'fallback') {
+    try {
+      db = await connectToMongo()
+      if (db) { try { await seed(db) } catch {} }
+    } catch (e) {
+      console.warn('MongoDB unavailable:', e.message)
+    }
   }
   try {
 
