@@ -973,6 +973,7 @@ async function handleRoute(request, { params }) {
   }
   try { await seed(db) } catch {}
 
+  try {
   // ---- Public (works without DB) ----
   if (route === '/' || route === '/root') {
     return json({ message: 'NEXUS API online', db: db ? 'connected' : 'disconnected', time: new Date().toISOString() })
