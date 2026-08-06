@@ -13,22 +13,11 @@ let client
 let db
 async function connectToMongo() {
   if (db) return db
-  try {
-    if (process.env.MONGO_URL && process.env.MONGO_URL !== 'fallback') {
-      client = new MongoClient(process.env.MONGO_URL)
-      await client.connect()
-      db = client.db(process.env.DB_NAME || 'nexus')
-      return db
-    }
-  } catch (e) {
-    console.warn('MongoDB connection failed, using in-memory:', e.message)
-  }
-  // Fallback to in-memory MongoDB
-  const { MongoMemoryServer } = require('mongodb-memory-server')
-  const mem = await MongoMemoryServer.create()
-  client = new MongoClient(mem.getUri())
+  const uri = process.env.MONGO_URL
+  if (!uri) return null
+  client = new MongoClient(uri)
   await client.connect()
-  db = client.db('nexus')
+  db = client.db(process.env.DB_NAME || 'nexus')
   return db
 }
 
@@ -962,12 +951,16 @@ async function handleRoute(request, { params }) {
   const { path = [] } = await params
   const route = `/${path.join('/')}`
   const method = request.method
+  let db = null
   try {
-    const db = await connectToMongo()
-    await seed(db)
+    db = await connectToMongo()
+    if (db) await seed(db)
+  } catch (e) {
+    console.warn('MongoDB unavailable:', e.message)
+  }
 
-    // ---- Public ----
-    if (route === '/' || route === '/root') return json({ message: 'NEXUS API online' })
+    // ---- Public (works without DB) ----
+    if (route === '/' || route === '/root') return json({ message: 'NEXUS API online', db: db ? 'connected' : 'disconnected' })
 
     if (route === '/auth/login' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
@@ -977,7 +970,7 @@ async function handleRoute(request, { params }) {
       if (body.username === U && body.password === P) {
         if (require2FA && !body.totpCode) return json({ error: '2FA required', require2FA: true }, 401)
         const token = signToken({ sub: 'admin', name: 'Manikanta', role: 'owner', exp: Date.now() + 7 * 86400000 })
-        await audit(db, 'auth.login', 'admin', {})
+        try { if (db) await audit(db, 'auth.login', 'admin', {}) } catch {}
         return json({ token, user: { name: 'Manikanta', role: 'owner', username: U }, require2FA })
       }
       return json({ error: 'Invalid credentials' }, 401)
