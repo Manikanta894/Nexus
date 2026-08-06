@@ -1,0 +1,20 @@
+name: Scheduler — Publish Scheduled + News Scan
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Every 30 minutes
+  workflow_dispatch:
+
+jobs:
+  publish-scheduled:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish Scheduled Posts + Scan News
+        run: |
+          RESP=$(curl -s -X POST "${{ secrets.APP_URL }}/api/cron" \
+            -H "x-cron-token: ${{ secrets.NEXUS_CRON_TOKEN }}" \
+            -H "Content-Type: application/json")
+          echo "RESP=$RESP"
+          PUBLISHED=$(echo "$RESP" | jq -r '.summary.published // 0')
+          NEWS=$(echo "$RESP" | jq -r '.summary.news.kept // 0')
+          echo "✅ Published: $PUBLISHED | News kept: $NEWS"

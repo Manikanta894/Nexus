@@ -1,0 +1,66 @@
+name: Nexus Daily Automation — Full Pipeline
+
+on:
+  schedule:
+    - cron: '0 8 * * *'   # 8:00 AM — full daily run
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Automation mode'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - social-only
+          - blog-only
+          - news-only
+
+jobs:
+  daily-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Full Daily Pipeline
+        run: |
+          APP="${{ secrets.APP_URL }}"
+          TOKEN="${{ secrets.NEXUS_API_TOKEN }}"
+          CRON="${{ secrets.NEXUS_CRON_TOKEN }}"
+          MODE="${{ github.event.inputs.mode || 'full' }}"
+          
+          echo "🚀 Starting Nexus automation — mode: $MODE"
+          
+          # Step 1: Publish any scheduled posts that are due
+          echo "📤 Publishing scheduled posts..."
+          curl -s -X POST "$APP/api/cron" -H "x-cron-token: $CRON" -H "Content-Type: application/json" | jq .
+          
+          # Step 2: Auto-generate social post
+          if [ "$MODE" = "full" ] || [ "$MODE" = "social-only" ]; then
+            echo "📱 Generating social post..."
+            curl -s -X POST "$APP/api/social/generate" \
+              -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              -d '{"platforms":["linkedin","instagram","facebook","threads"]}' | jq .
+          fi
+          
+          # Step 3: Scan news feeds
+          if [ "$MODE" = "full" ] || [ "$MODE" = "news-only" ]; then
+            echo "📰 Scanning news feeds..."
+            curl -s -X POST "$APP/api/news/scan" \
+              -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" | jq .
+          fi
+          
+          # Step 4: Run seasonal campaign check
+          if [ "$MODE" = "full" ]; then
+            echo "📅 Checking seasonal campaigns..."
+            curl -s -X POST "$APP/api/seasonal/scan" \
+              -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" | jq .
+          fi
+          
+          echo "✅ Daily pipeline complete"
+
+      - name: Notify Status
+        if: always()
+        run: |
+          STATUS="${{ job.status }}"
+          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"content\":\"🤖 Nexus daily automation: $STATUS\"}" || true

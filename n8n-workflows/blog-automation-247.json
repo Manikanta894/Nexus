@@ -1,0 +1,45 @@
+{
+  "name": "Nexus — Blog Automation 24/7",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "days", "daysInterval": 2 }] }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 2 Days",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://your-nexus-app.vercel.app/api/blog/generate",
+        "method": "POST",
+        "jsonBody": "{\"seedText\":\"={{$randomTopic}}\"}",
+        "headers": { "Authorization": "Bearer {{$env.NEXUS_API_TOKEN}}", "Content-Type": "application/json" }
+      },
+      "id": "generate-blog",
+      "name": "Auto-Generate Blog",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://your-nexus-app.vercel.app/api/newsletter/generate",
+        "method": "POST",
+        "jsonBody": "{\"blogId\":\"={{$json.job.id}}\"}",
+        "headers": { "Authorization": "Bearer {{$env.NEXUS_API_TOKEN}}", "Content-Type": "application/json" }
+      },
+      "id": "gen-newsletter",
+      "name": "Auto-Generate Newsletter from Blog",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300]
+    }
+  ],
+  "connections": {
+    "Every 2 Days": { "main": [[{ "node": "Auto-Generate Blog", "type": "main", "index": 0 }]] },
+    "Auto-Generate Blog": { "main": [[{ "node": "Auto-Generate Newsletter from Blog", "type": "main", "index": 0 }]] }
+  }
+}

@@ -1,0 +1,35 @@
+name: Social Automation — Generate & Approve
+
+on:
+  schedule:
+    - cron: '0 9 * * *'   # 9:00 AM daily
+    - cron: '0 17 * * *'  # 5:00 PM daily
+  workflow_dispatch:        # manual trigger button
+
+jobs:
+  generate-social:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto-Generate Social Post
+        run: |
+          RESP=$(curl -s -X POST "${{ secrets.APP_URL }}/api/social/generate" \
+            -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"platforms":["linkedin","instagram","facebook","threads"]}')
+          echo "RESP=$RESP"
+          JOB_ID=$(echo "$RESP" | jq -r '.job.id')
+          if [ "$JOB_ID" != "null" ] && [ "$JOB_ID" != "" ]; then
+            echo "✅ Social draft created: $JOB_ID"
+            echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Generation failed"
+            exit 1
+          fi
+        id: generate
+
+      - name: Notify Discord (optional)
+        if: success()
+        run: |
+          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"content\":\"📱 New social draft ready for approval: ${{ steps.generate.outputs.job_id }}\"}" || true

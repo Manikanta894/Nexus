@@ -1,0 +1,78 @@
+{
+  "name": "Nexus — Social Automation 24/7",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "minutes", "minutesInterval": 60 }] }
+      },
+      "id": "schedule-trigger",
+      "name": "Every Hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://your-nexus-app.vercel.app/api/social/generate",
+        "method": "POST",
+        "jsonBody": "{\"platforms\":[\"linkedin\",\"instagram\",\"facebook\",\"threads\"]}",
+        "headers": { "Authorization": "Bearer {{$env.NEXUS_API_TOKEN}}", "Content-Type": "application/json" }
+      },
+      "id": "generate-social",
+      "name": "Auto-Generate Social Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true },
+          "conditions": [
+            { "id": "ok", "leftValue": "={{$json.job?.id}}", "rightValue": "", "operator": { "type": "string", "operation": "isNotEmpty" } }
+          ]
+        }
+      },
+      "id": "check-result",
+      "name": "Generation OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://your-nexus-app.vercel.app/api/cron",
+        "method": "POST",
+        "headers": { "x-cron-token": "{{$env.NEXUS_CRON_TOKEN}}", "Content-Type": "application/json" }
+      },
+      "id": "run-cron",
+      "name": "Publish Scheduled Posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://your-nexus-app.vercel.app/api/news/scan",
+        "method": "POST",
+        "headers": { "Authorization": "Bearer {{$env.NEXUS_API_TOKEN}}", "Content-Type": "application/json" }
+      },
+      "id": "scan-news",
+      "name": "Scan News Feeds",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 400]
+    }
+  ],
+  "connections": {
+    "Every Hour": { "main": [[{ "node": "Auto-Generate Social Post", "type": "main", "index": 0 }]] },
+    "Auto-Generate Social Post": { "main": [[{ "node": "Generation OK?", "type": "main", "index": 0 }]] },
+    "Generation OK?": {
+      "main": [
+        [{ "node": "Publish Scheduled Posts", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Publish Scheduled Posts": { "main": [[{ "node": "Scan News Feeds", "type": "main", "index": 0 }]] }
+  }
+}
