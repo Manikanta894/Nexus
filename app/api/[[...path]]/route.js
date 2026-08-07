@@ -549,6 +549,77 @@ async function handle(request) {
     return json({ ok: true, social: { id: job.id } })
   }
 
+  // ---------- Pipeline orchestrator (runs the full phased automation) ----------
+  if (route === '/pipeline/run' && method === 'POST') {
+    const body = await request.json().catch(() => ({}))
+    const module = body.module || 'social'
+    const { runPipeline, blogPipeline, scanNews, loadSchedule, shouldRunAt } = await import('../../../lib/pipeline.js')
+    // If GitHub Actions fires every 30 min but we only want scheduled posts,
+    // respectSchedule:true makes the pipeline run only at the configured times
+    // (default 5 posting slots per weekday → 5 posts/day).
+    if (body.respectSchedule) {
+      const schedule = await loadSchedule({ collection: (name) => ({ findOne: async (q = {}) => { const items = db[name] || []; if (!q || Object.keys(q).length === 0) return items[0] || null; return items.find((i) => Object.entries(q).every(([k, v]) => i[k] === v)) || null } }) })
+      if (!shouldRunAt(schedule, new Date())) {
+        return json({ ok: false, reason: 'Not a scheduled posting time — checking schedule from Google Sheets', schedule })
+      }
+    }
+    // Build a minimal db adapter over the in-memory store so the pipeline works.
+    const dbAdapter = {
+      collection: (name) => ({
+        findOne: async (q = {}) => {
+          const items = db[name] || []
+          if (!q || Object.keys(q).length === 0) return items[0] || null
+          return items.find((i) => Object.entries(q).every(([k, v]) => i[k] === v)) || null
+        },
+        find: async (q = {}) => {
+          let items = db[name] || []
+          if (q.status) items = items.filter((i) => i.status === q.status)
+          return { toArray: async () => items, sort: () => ({ toArray: async () => items }), limit: (n) => ({ toArray: async () => items.slice(0, n) }) }
+        },
+        insertOne: async (doc) => { (db[name] = db[name] || []).push(doc); return { insertedId: doc.id } },
+        updateOne: async (q, u) => { const i = (db[name] || []).findIndex((x) => Object.entries(q).every(([k, v]) => x[k] === v)); if (i >= 0 && u.$set) Object.assign(db[name][i], u.$set); return { modifiedCount: i >= 0 ? 1 : 0 } },
+        countDocuments: async () => (db[name] || []).length,
+        deleteMany: async () => ({ deletedCount: 0 }),
+      }),
+    }
+    let result
+    if (module === 'blog') result = await blogPipeline(dbAdapter, { seedText: body.seedText || 'AI in business' }, body.source || 'manual')
+    else if (module === 'news') result = await scanNews(dbAdapter)
+    else result = await runPipeline(dbAdapter, { platforms: body.platforms || DEFAULT_PLATFORMS, seedText: body.seedText || 'AI in business' }, body.source || 'manual')
+    audit(user.sub, `pipeline.${module}`, { ok: result.ok, reason: result.reason || null })
+    return json(result)
+  }
+  if (route === '/pipeline/publish' && method === 'POST') {
+    const body = await request.json().catch(() => ({}))
+    const post = db.social_posts.find((p) => p.id === body.id)
+    if (!post) return json({ error: 'Not found' }, 404)
+    const { publishToPlatforms, archiveImage } = await import('../../../lib/pipeline.js')
+    const integrations = {}
+    for (const it of db.integrations) integrations[it.id] = it.fields || {}
+    const pub = await publishToPlatforms(post, integrations)
+    if (pub.ok) {
+      post.status = 'Published'
+      post.publishedAt = new Date().toISOString()
+      await archiveImage(db, post.imageId, {}).catch(() => {})
+      audit(user.sub, 'pipeline.publish', { id: post.id, ok: true })
+    } else {
+      post.status = 'Failed'
+      post.lastError = Object.values(pub.results).find((r) => !r.ok)?.error || 'Publish failed'
+      audit(user.sub, 'pipeline.publish', { id: post.id, ok: false, error: post.lastError })
+    }
+    return json({ ok: pub.ok, results: pub.results, job: post })
+  }
+  if (route === '/pipeline/status' && method === 'GET') {
+    const { learningInsights } = await import('../../../lib/pipeline.js')
+    const insights = learningInsights(db.social_posts)
+    return json({
+      running: db.social_posts.filter((p) => p.status === 'Pending Approval' || p.status === 'Scheduled').length,
+      completed: db.social_posts.filter((p) => p.status === 'Published').length,
+      failed: db.social_posts.filter((p) => p.status === 'Failed' || p.status === 'Rejected').length,
+      insights,
+    })
+  }
+
   // ---------- Other core endpoints ----------
   if (route === '/auth/me') return json({ user })
   if (route === '/assistant' && method === 'GET') {

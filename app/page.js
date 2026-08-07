@@ -250,39 +250,43 @@ async function verifyBiometric() {
   }
 }
 
-// Face verification gate — shown on app open after login
+// Face verification gate — shown ONCE per session after login.
+// iOS Safari requires a user gesture for WebAuthn, so Face ID is enabled
+// via an explicit "Enable Face ID" button (never auto-registered in useEffect).
 function FaceGate({ onVerified, onSkip }) {
-  const [state, setState] = useState('checking') // checking | ready | pin | error
+  const [state, setState] = useState('checking') // checking | ready | pin | error | enabling
   const [pin, setPin] = useState('')
   const [msg, setMsg] = useState('')
 
+  // Jarvis announces the gate once
   useEffect(() => {
-    const run = async () => {
-      const registered = localStorage.getItem(FACE_KEY)
-      if (!isWebAuthnAvailable()) {
-        // No biometrics → require PIN setup
-        if (!localStorage.getItem(FACE_PIN)) {
-          setState('pin'); setMsg('Set a 4-digit PIN for verification')
-        } else {
-          setState('pin'); setMsg('Enter your PIN')
-        }
-        return
-      }
-      if (!registered) {
-        const r = await registerBiometric()
-        if (r.ok) { setState('ready'); setMsg('Biometric registered — tap to verify') }
-        else { setState('pin'); setMsg('Set a 4-digit PIN instead') }
-        return
-      }
-      setState('ready'); setMsg('Verify your identity to continue')
+    speak('Face authentication required', 'Boss')
+    const registered = localStorage.getItem(FACE_KEY)
+    if (!isWebAuthnAvailable()) {
+      if (!localStorage.getItem(FACE_PIN)) { setState('pin'); setMsg('Set a 4-digit PIN — Face ID needs Safari on a secure (https) site') }
+      else { setState('pin'); setMsg('Enter your PIN') }
+      return
     }
-    run()
+    if (registered) { setState('ready'); setMsg('Face ID ready — tap to verify') }
+    else { setState('ready'); setMsg('Enable Face ID to unlock with your biometrics') }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Enable Face ID — MUST be triggered by a user tap for iOS to allow it
+  const enableFaceId = async () => {
+    setState('enabling'); setMsg('Setting up Face ID…')
+    const r = await registerBiometric()
+    if (r.ok) { setState('ready'); setMsg('Face ID enabled — tap to verify now') }
+    else {
+      setState('pin')
+      setMsg('Face ID needs Safari + a device passcode + https. Set a PIN instead.')
+    }
+  }
 
   const doVerify = async () => {
     setMsg('Verifying…')
     const r = await verifyBiometric()
-    if (r.ok) { onVerified(); return }
+    if (r.ok) { speak('Access granted'); toast.success('Identity verified'); onVerified(); return }
     if (r.reason === 'unsupported') { setState('pin'); setMsg('Enter your PIN'); return }
     setMsg('Verification cancelled — try again or use PIN')
   }
@@ -290,11 +294,15 @@ function FaceGate({ onVerified, onSkip }) {
   const doPin = () => {
     const stored = localStorage.getItem(FACE_PIN)
     if (!stored) {
-      if (pin.length === 4) { localStorage.setItem(FACE_PIN, pin); onVerified(); return }
+      if (pin.length === 4) {
+        localStorage.setItem(FACE_PIN, pin)
+        if (isWebAuthnAvailable()) localStorage.setItem(FACE_KEY, 'registered') // remember choice
+        speak('Access granted'); toast.success('Identity verified'); onVerified(); return
+      }
       setMsg('PIN must be 4 digits')
       return
     }
-    if (pin === stored) { onVerified(); return }
+    if (pin === stored) { speak('Access granted'); toast.success('Identity verified'); onVerified(); return }
     setMsg('Incorrect PIN')
   }
 
@@ -309,12 +317,25 @@ function FaceGate({ onVerified, onSkip }) {
 
         {state === 'ready' && (
           <div className="space-y-3">
-            <Button onClick={doVerify} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 h-11">
-              <ScanFace className="h-4 w-4 mr-2" /> Verify with Face ID
-            </Button>
+            {localStorage.getItem(FACE_KEY) ? (
+              <Button onClick={doVerify} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 h-11">
+                <ScanFace className="h-4 w-4 mr-2" /> Verify with Face ID
+              </Button>
+            ) : (
+              <Button onClick={enableFaceId} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 h-11">
+                <ScanFace className="h-4 w-4 mr-2" /> Enable Face ID
+              </Button>
+            )}
             <Button variant="outline" className="w-full border-white/10" onClick={() => { setState('pin'); setMsg('Enter your PIN') }}>
               Use PIN instead
             </Button>
+          </div>
+        )}
+
+        {state === 'enabling' && (
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="h-6 w-6 animate-spin text-blue-400" />
+            <p className="text-sm text-muted-foreground">Unlock with Face ID to register…</p>
           </div>
         )}
 
@@ -324,7 +345,7 @@ function FaceGate({ onVerified, onSkip }) {
             <Button onClick={doPin} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 h-11">
               <Fingerprint className="h-4 w-4 mr-2" /> {localStorage.getItem(FACE_PIN) ? 'Verify PIN' : 'Set PIN'}
             </Button>
-            {isWebAuthnAvailable() && <Button variant="outline" className="w-full border-white/10" onClick={() => { setState('ready'); setMsg('Verify your identity to continue') }}>Use Face ID</Button>}
+            {isWebAuthnAvailable() && <Button variant="outline" className="w-full border-white/10" onClick={() => { setState('ready'); setMsg(localStorage.getItem(FACE_KEY) ? 'Face ID ready — tap to verify' : 'Enable Face ID to unlock') }}>Use Face ID</Button>}
           </div>
         )}
 
@@ -2587,168 +2608,10 @@ function VersionsView() {
   )
 }
 
-// ================================================================== AUTOPILOT 24/7
+// ================================================================== AUTOPILOT 24/7 — MISSION CONTROL
+import MissionControl from '@/components/mission-control'
 function AutopilotView() {
-  const [cfg, setCfg] = useState(null)
-  const [saving, setSaving] = useState(false)
-  const [running, setRunning] = useState(false)
-
-  const load = useCallback(() => { api('/autopilot').then((r) => setCfg(r.config || DEFAULT_AUTOPILOT)).catch(() => setCfg(DEFAULT_AUTOPILOT)) }, [])
-  useEffect(() => { load() }, [load])
-
-  const save = async () => {
-    setSaving(true)
-    try { await api('/autopilot', { method: 'PUT', body: JSON.stringify({ cfg }) }); toast.success('Auto-Pilot config saved') }
-    catch (e) { toast.error(e.message) } finally { setSaving(false) }
-  }
-
-  const runNow = async () => {
-    try { const r = await api('/autopilot/run', { method: 'POST' }); toast.success('Auto-Pilot triggered', { description: `Social draft ${r.social?.id?.slice(0, 8)} created` }) }
-    catch (e) { toast.error(e.message) }
-  }
-
-  const update = (module, key, value) => setCfg((c) => ({ ...c, [module]: { ...c[module], [key]: value } }))
-  const toggleModule = (module) => setCfg((c) => ({ ...c, [module]: { ...c[module], enabled: !c[module]?.enabled } }))
-
-  if (!cfg) return <Loading />
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-bold flex items-center gap-2"><Zap className="h-6 w-6 text-amber-400" /> Auto-Pilot 24/7</h1>
-          <p className="text-sm text-muted-foreground">Fully automated content lifecycle — generate → Discord approval → publish → archive. Runs around the clock.</p>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={runNow} variant="outline" className="border-white/10"><Play className="h-4 w-4 mr-2" /> Run Now</Button>
-          <Button onClick={save} disabled={saving} className="bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Save className="h-4 w-4 mr-2" /> Save</>}</Button>
-        </div>
-      </div>
-
-      <Panel className="p-5 glow-amber">
-        <div className="flex items-start gap-4">
-          <div className="h-10 w-10 shrink-0 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 grid place-items-center"><Zap className="h-5 w-5 text-white" /></div>
-          <div>
-            <h3 className="font-display font-semibold mb-1">How Auto-Pilot works</h3>
-            <p className="text-sm text-muted-foreground leading-relaxed">On schedule, the system picks the oldest Drive image (FIFO) → AI vision + research → platform-native drafts → quality check → saves to Sheets → sends Discord approval card. You approve from Discord or PWA → it publishes, archives the image, and logs everything. The n8n workflows (in <span className="font-code text-blue-400">/n8n-workflows</span>) run these schedules 24/7 on your VPS.</p>
-          </div>
-        </div>
-      </Panel>
-
-      {/* Social Automation */}
-      <Panel className="p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-display font-semibold flex items-center gap-2"><Sparkles className="h-4 w-4 text-blue-400" /> Social Automation</h3>
-          <Switch checked={cfg.social?.enabled} onCheckedChange={() => toggleModule('social')} />
-        </div>
-        {cfg.social?.enabled && (
-          <div className="grid sm:grid-cols-3 gap-4">
-            <Field label="Posts per day">
-              <select value={cfg.social.timesPerDay} onChange={(e) => update('social', 'timesPerDay', Number(e.target.value))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm">
-                <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option><option value={4}>4</option>
-              </select>
-            </Field>
-            <Field label="Morning post">
-              <input type="time" value={cfg.social.times?.[0] || '09:00'} onChange={(e) => update('social', 'times', [e.target.value, cfg.social.times?.[1] || '17:00'])} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm font-code" />
-            </Field>
-            <Field label="Evening post">
-              <input type="time" value={cfg.social.times?.[1] || '17:00'} onChange={(e) => update('social', 'times', [cfg.social.times?.[0] || '09:00', e.target.value])} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm font-code" />
-            </Field>
-          </div>
-        )}
-      </Panel>
-
-      {/* Blog Automation */}
-      <Panel className="p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-display font-semibold flex items-center gap-2"><FileText className="h-4 w-4 text-violet-400" /> Blog Engine</h3>
-          <Switch checked={cfg.blog?.enabled} onCheckedChange={() => toggleModule('blog')} />
-        </div>
-        {cfg.blog?.enabled && (
-          <div className="grid sm:grid-cols-3 gap-4">
-            <Field label="Posts per week">
-              <select value={cfg.blog.timesPerWeek} onChange={(e) => update('blog', 'timesPerWeek', Number(e.target.value))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm">
-                <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option><option value={5}>5</option>
-              </select>
-            </Field>
-            <Field label="Publish day">
-              <select value={cfg.blog.days?.join(',') || '1,3,5'} onChange={(e) => update('blog', 'days', e.target.value.split(',').map(Number))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm">
-                <option value="1,3,5">Mon, Wed, Fri</option><option value="1,4">Mon, Thu</option><option value="2,5">Tue, Fri</option><option value="1,2,3,4,5">Weekdays</option>
-              </select>
-            </Field>
-            <Field label="Publish time">
-              <input type="time" value={cfg.blog.time || '10:00'} onChange={(e) => update('blog', 'time', e.target.value)} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm font-code" />
-            </Field>
-          </div>
-        )}
-      </Panel>
-
-      {/* LinkedIn Engagement */}
-      <Panel className="p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-display font-semibold flex items-center gap-2"><MessageSquare className="h-4 w-4 text-blue-400" /> LinkedIn Auto-Comment</h3>
-          <Switch checked={cfg.linkedin?.enabled} onCheckedChange={() => toggleModule('linkedin')} />
-        </div>
-        {cfg.linkedin?.enabled && (
-          <div className="grid sm:grid-cols-2 gap-4">
-            <Field label="Comments per day">
-              <input type="number" min="1" max="20" value={cfg.linkedin.commentsPerDay || 5} onChange={(e) => update('linkedin', 'commentsPerDay', Number(e.target.value))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm font-code" />
-            </Field>
-            <Field label="Topics (comma separated)">
-              <input value={(cfg.linkedin.topics || []).join(', ')} onChange={(e) => update('linkedin', 'topics', e.target.value.split(',').map((s) => s.trim()))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm" />
-            </Field>
-          </div>
-        )}
-      </Panel>
-
-      {/* News + Newsletter */}
-      <div className="grid lg:grid-cols-2 gap-6">
-        <Panel className="p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-semibold flex items-center gap-2"><Radar className="h-4 w-4 text-emerald-400" /> News Radar</h3>
-            <Switch checked={cfg.news?.enabled} onCheckedChange={() => toggleModule('news')} />
-          </div>
-          {cfg.news?.enabled && (
-            <div className="space-y-3">
-              <Field label="Scan interval (minutes)">
-                <input type="number" min="15" step="15" value={cfg.news.intervalMinutes || 120} onChange={(e) => update('news', 'intervalMinutes', Number(e.target.value))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm font-code" />
-              </Field>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Check className="h-3 w-3 text-emerald-400" /> Auto-generate social from top news</div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Check className="h-3 w-3 text-emerald-400" /> Auto-generate blog from top news</div>
-            </div>
-          )}
-        </Panel>
-        <Panel className="p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-semibold flex items-center gap-2"><Mail className="h-4 w-4 text-amber-400" /> Newsletter</h3>
-            <Switch checked={cfg.newsletter?.enabled} onCheckedChange={() => toggleModule('newsletter')} />
-          </div>
-          {cfg.newsletter?.enabled && (
-            <div className="space-y-3">
-              <Field label="Send day">
-                <select value={cfg.newsletter.day || 5} onChange={(e) => update('newsletter', 'day', Number(e.target.value))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm">
-                  <option value="1">Monday</option><option value="3">Wednesday</option><option value="5">Friday</option>
-                </select>
-              </Field>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Check className="h-3 w-3 text-emerald-400" /> Auto-converts approved blogs to newsletter</div>
-            </div>
-          )}
-        </Panel>
-      </div>
-
-      <Panel className="p-5">
-        <h3 className="font-display font-semibold mb-3 flex items-center gap-2"><Github className="h-4 w-4 text-blue-400" /> GitHub Actions 24/7 Triggers</h3>
-        <p className="text-xs text-muted-foreground mb-3">These workflows run on GitHub's infrastructure — no n8n or VPS needed. Set the secrets in <span className="font-code text-blue-400">Settings → Secrets → Actions</span>:</p>
-        <div className="grid sm:grid-cols-2 gap-3">
-          <div className="glass rounded-lg p-3"><div className="text-sm font-grotesk">social-automation.yml</div><div className="text-xs text-muted-foreground">9 AM + 5 PM → auto-generate social post</div></div>
-          <div className="glass rounded-lg p-3"><div className="text-sm font-grotesk">blog-automation.yml</div><div className="text-xs text-muted-foreground">Mon/Wed/Fri → auto-generate blog</div></div>
-          <div className="glass rounded-lg p-3"><div className="text-sm font-grotesk">scheduler.yml</div><div className="text-xs text-muted-foreground">Every 30 min → publish scheduled + scan news</div></div>
-          <div className="glass rounded-lg p-3"><div className="text-sm font-grotesk">daily-automation.yml</div><div className="text-xs text-muted-foreground">8 AM → full pipeline run</div></div>
-        </div>
-        <p className="text-xs text-muted-foreground mt-3">Required secrets: <span className="font-code">APP_URL</span>, <span className="font-code">NEXUS_API_TOKEN</span>, <span className="font-code">NEXUS_CRON_TOKEN</span>, <span className="font-code">DISCORD_WEBHOOK</span></p>
-      </Panel>
-    </div>
-  )
+  return <MissionControl go={(v) => { if (typeof window !== 'undefined') history.replaceState(null, '', v === 'dashboard' ? '/' : `/#${v}`); window.dispatchEvent(new HashChangeEvent('hashchange')) }} />
 }
 
 // ================================================================== LEARNING ENGINE
@@ -2997,8 +2860,14 @@ function App() {
     try { const u = localStorage.getItem('nexus_user'); const t = localStorage.getItem('nexus_token'); return (u && t) ? JSON.parse(u) : null } catch { return null }
   })
   const [ready, setReady] = useState(false)
-  const [faceVerified, setFaceVerified] = useState(false)
+  // Persist face verification in sessionStorage — survives page reloads / HMR /
+  // preview proxy refreshes that re-showed the FaceGate every few seconds.
+  const [faceVerified, setFaceVerified] = useState(() => {
+    if (typeof window === 'undefined') return false
+    try { return sessionStorage.getItem('nexus_face_verified') === 'true' } catch { return false }
+  })
   const [showFace, setShowFace] = useState(false)
+  const markFace = (v) => { setFaceVerified(v); try { if (v) sessionStorage.setItem('nexus_face_verified', 'true'); else sessionStorage.removeItem('nexus_face_verified') } catch {} }
   useEffect(() => {
     const t = localStorage.getItem('nexus_token'); const u = localStorage.getItem('nexus_user')
     if (t && u) {
@@ -3009,41 +2878,19 @@ function App() {
     }
     setReady(true)
   }, [])
-  // Re-verify face whenever the window regains focus (session security)
-  useEffect(() => {
-    if (!user) return
-    const onFocus = () => {
-      // Only re-prompt if the app is already open (not during initial login flow)
-      if (faceVerified) setShowFace(true)
-    }
-    window.addEventListener('focus', onFocus)
-    const onVisibility = () => { if (document.visibilityState === 'visible' && faceVerified) setShowFace(true) }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      window.removeEventListener('focus', onFocus)
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
-  }, [user, faceVerified])
-  const logout = () => { localStorage.removeItem('nexus_token'); localStorage.removeItem('nexus_user'); setUser(null); setFaceVerified(false); toast.success('Session ended') }
+  // Face ID is verified ONCE per tab session and stored in sessionStorage —
+  // no focus/visibility re-prompting, and it survives page reloads/HMR/preview
+  // refreshes that were re-showing the gate every few seconds.
+  const logout = () => { try { sessionStorage.removeItem('nexus_face_verified') } catch {} localStorage.removeItem('nexus_token'); localStorage.removeItem('nexus_user'); setUser(null); setFaceVerified(false); toast.success('Session ended') }
   if (!ready) return <div className="min-h-screen grid-bg grid place-items-center"><Loader2 className="h-8 w-8 animate-spin text-blue-400" /></div>
   if (!user) return <Login onLogin={setUser} />
   if (!faceVerified) {
     return <FaceGate
-      onVerified={() => { setFaceVerified(true); setShowFace(false); toast.success('Identity verified') }}
-      onSkip={() => { setFaceVerified(true); setShowFace(false); toast.info('Face verification skipped for this session') }}
+      onVerified={() => { markFace(true); setShowFace(false) }}
+      onSkip={() => { markFace(true); setShowFace(false) }}
     />
   }
-  return (
-    <>
-      {showFace && (
-        <FaceGate
-          onVerified={() => { setFaceVerified(true); setShowFace(false) }}
-          onSkip={() => setShowFace(false)}
-        />
-      )}
-      <Shell user={user} onLogout={logout} />
-    </>
-  )
+  return <Shell user={user} onLogout={logout} />
 }
 
 export default App
