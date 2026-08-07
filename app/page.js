@@ -14,7 +14,7 @@ import {
   Zap, Activity, ChevronLeft, Cpu, TrendingUp, Users, Eye, Send, Save, Trash2, Play,
   Star, Rocket, Newspaper, Mic, Fingerprint, Loader2, Copy, ExternalLink, Globe, Github,
   Triangle, Linkedin, Facebook, Instagram, MessageCircle, CircleDot, Layers, Award, ImageIcon,
-  Lock, Wand2, Plus, Filter, ShieldAlert, Wallet, BookOpen, Hash,
+  Lock, Wand2, Plus, Filter, ShieldAlert, Wallet, BookOpen, Hash, ScanFace, ScanEye, ShieldCheck as ShieldIcon,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -198,6 +198,175 @@ function Login({ onLogin }) {
   )
 }
 
+// ================================================================== FACE + EYEBALL VERIFICATION
+// Face verification uses the WebAuthn API (Face ID / Touch ID / Windows Hello /
+// platform biometrics). Falls back to a PIN if biometrics are unavailable.
+const FACE_KEY = 'nexus_face_credential'
+const FACE_PIN = 'nexus_face_pin'
+
+function isWebAuthnAvailable() {
+  return typeof window !== 'undefined' && !!window.PublicKeyCredential && !!navigator.credentials
+}
+
+async function registerBiometric() {
+  if (!isWebAuthnAvailable()) return { ok: false, reason: 'unsupported' }
+  try {
+    const challenge = crypto.getRandomValues(new Uint8Array(32))
+    const cred = await navigator.credentials.create({
+      publicKey: {
+        challenge,
+        rp: { name: 'NEXUS Command Center' },
+        user: { id: new Uint8Array(16), name: 'admin', displayName: 'Manikanta R' },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+        timeout: 60000,
+      },
+    })
+    if (cred) {
+      localStorage.setItem(FACE_KEY, 'registered')
+      return { ok: true }
+    }
+    return { ok: false, reason: 'cancelled' }
+  } catch (e) {
+    return { ok: false, reason: e.name === 'NotAllowedError' ? 'cancelled' : 'unsupported' }
+  }
+}
+
+async function verifyBiometric() {
+  if (!isWebAuthnAvailable()) return { ok: false, reason: 'unsupported' }
+  try {
+    const challenge = crypto.getRandomValues(new Uint8Array(32))
+    const cred = await navigator.credentials.get({
+      publicKey: {
+        challenge,
+        rpId: window.location.hostname,
+        userVerification: 'required',
+        timeout: 60000,
+      },
+    })
+    return cred ? { ok: true } : { ok: false, reason: 'cancelled' }
+  } catch (e) {
+    return { ok: false, reason: e.name === 'NotAllowedError' ? 'cancelled' : 'unsupported' }
+  }
+}
+
+// Face verification gate — shown on app open after login
+function FaceGate({ onVerified, onSkip }) {
+  const [state, setState] = useState('checking') // checking | ready | pin | error
+  const [pin, setPin] = useState('')
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => {
+    const run = async () => {
+      const registered = localStorage.getItem(FACE_KEY)
+      if (!isWebAuthnAvailable()) {
+        // No biometrics → require PIN setup
+        if (!localStorage.getItem(FACE_PIN)) {
+          setState('pin'); setMsg('Set a 4-digit PIN for verification')
+        } else {
+          setState('pin'); setMsg('Enter your PIN')
+        }
+        return
+      }
+      if (!registered) {
+        const r = await registerBiometric()
+        if (r.ok) { setState('ready'); setMsg('Biometric registered — tap to verify') }
+        else { setState('pin'); setMsg('Set a 4-digit PIN instead') }
+        return
+      }
+      setState('ready'); setMsg('Verify your identity to continue')
+    }
+    run()
+  }, [])
+
+  const doVerify = async () => {
+    setMsg('Verifying…')
+    const r = await verifyBiometric()
+    if (r.ok) { onVerified(); return }
+    if (r.reason === 'unsupported') { setState('pin'); setMsg('Enter your PIN'); return }
+    setMsg('Verification cancelled — try again or use PIN')
+  }
+
+  const doPin = () => {
+    const stored = localStorage.getItem(FACE_PIN)
+    if (!stored) {
+      if (pin.length === 4) { localStorage.setItem(FACE_PIN, pin); onVerified(); return }
+      setMsg('PIN must be 4 digits')
+      return
+    }
+    if (pin === stored) { onVerified(); return }
+    setMsg('Incorrect PIN')
+  }
+
+  return (
+    <div className="min-h-screen grid-bg flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="glass-strong glow-blue rounded-2xl w-full max-w-md p-8 text-center">
+        <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-500 grid place-items-center mx-auto mb-4 glow-blue">
+          <ScanFace className="h-8 w-8 text-white" />
+        </div>
+        <h1 className="font-display text-xl font-bold mb-1">Identity Verification</h1>
+        <p className="text-sm text-muted-foreground mb-6">Face ID / biometric or PIN required to open the Command Center.</p>
+
+        {state === 'ready' && (
+          <div className="space-y-3">
+            <Button onClick={doVerify} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 h-11">
+              <ScanFace className="h-4 w-4 mr-2" /> Verify with Face ID
+            </Button>
+            <Button variant="outline" className="w-full border-white/10" onClick={() => { setState('pin'); setMsg('Enter your PIN') }}>
+              Use PIN instead
+            </Button>
+          </div>
+        )}
+
+        {state === 'pin' && (
+          <div className="space-y-3">
+            <Input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => e.key === 'Enter' && doPin()} placeholder="••••" className="bg-secondary/50 border-white/10 font-code text-center text-2xl tracking-[0.5em]" />
+            <Button onClick={doPin} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 h-11">
+              <Fingerprint className="h-4 w-4 mr-2" /> {localStorage.getItem(FACE_PIN) ? 'Verify PIN' : 'Set PIN'}
+            </Button>
+            {isWebAuthnAvailable() && <Button variant="outline" className="w-full border-white/10" onClick={() => { setState('ready'); setMsg('Verify your identity to continue') }}>Use Face ID</Button>}
+          </div>
+        )}
+
+        {msg && <p className="text-xs text-amber-400 mt-4">{msg}</p>}
+        <button onClick={onSkip} className="text-xs text-muted-foreground hover:text-white mt-6 underline underline-offset-4">Skip for this session</button>
+      </motion.div>
+    </div>
+  )
+}
+
+// Eyeball verification — visual confirmation before high-impact actions
+function EyeballGate({ open, onConfirm, onCancel, title }) {
+  const [checked, setChecked] = useState(false)
+  const [hold, setHold] = useState(false)
+  useEffect(() => { if (open) { setChecked(false); setHold(false) } }, [open])
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent className="glass-strong border-white/10 max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-display flex items-center gap-2"><ScanEye className="h-5 w-5 text-emerald-400" /> Eyeball Verification</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">You are about to <span className="text-white font-medium">{title}</span>. This action is logged and cannot be undone without a manual revert.</p>
+        <div className="glass rounded-lg p-4 space-y-3">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} className="mt-1 h-4 w-4 accent-emerald-500" />
+            <span className="text-sm text-muted-foreground">I have <span className="text-white">eyeballed</span> the content on every platform tab and confirm it is accurate, on-brand, and ready to publish.</span>
+          </label>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <ShieldIcon className="h-3.5 w-3.5 text-emerald-400" /> This confirmation is recorded in the Audit Log.
+          </div>
+        </div>
+        <DialogFooter className="flex-row gap-2">
+          <Button onClick={onCancel} variant="outline" className="border-white/10 flex-1">Cancel</Button>
+          <Button onClick={() => { if (checked) onConfirm() }} disabled={!checked} className="flex-1 bg-emerald-600 hover:bg-emerald-500">
+            <Check className="h-4 w-4 mr-1" /> Confirm & Continue
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ================================================================== SHARED UI
 const StatusDot = ({ status }) => {
   const map = { connected: '#22C55E', expiring: '#F59E0B', expired: '#EF4444', disabled: '#6B7280' }
@@ -269,12 +438,23 @@ const STATUS_STYLES = {
 
 // Shared approval action bar — the same spine for every module
 function ActionBar({ job, onAct, onEdit, onRevert }) {
+  const [eyeballOpen, setEyeballOpen] = useState(false)
   const pending = ['Pending Approval', 'Scheduled'].includes(job?.status)
+  const doApprove = () => {
+    if (job?.factcheck?.status === 'Blocked') { toast.error('Blocked by Fact-Check gate'); return }
+    setEyeballOpen(true)
+  }
   return (
     <div className="flex flex-wrap items-center gap-2 p-4 border-t border-white/5 bg-secondary/20">
+      <EyeballGate
+        open={eyeballOpen}
+        title="publish this content to all selected platforms"
+        onCancel={() => setEyeballOpen(false)}
+        onConfirm={() => { setEyeballOpen(false); onAct('approve') }}
+      />
       {pending && (
         <>
-          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500" onClick={() => onAct('approve')}><Check className="h-4 w-4 mr-1" /> Approve & Publish</Button>
+          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500" onClick={doApprove}><Check className="h-4 w-4 mr-1" /> Approve & Publish</Button>
           <Button size="sm" variant="outline" className="border-white/10" onClick={() => onAct('regenerate')}><RefreshCw className="h-4 w-4 mr-1" /> Regenerate</Button>
           {onEdit && <Button size="sm" variant="outline" className="border-white/10" onClick={onEdit}><Pencil className="h-4 w-4 mr-1" /> Edit</Button>}
           <Button size="sm" variant="outline" className="border-white/10" onClick={() => onAct('schedule')}><Clock className="h-4 w-4 mr-1" /> Schedule</Button>
@@ -732,7 +912,7 @@ function IntegrationsView() {
             <div key={m.module} className="flex flex-wrap items-center gap-2 glass rounded-lg p-3">
               <span className="font-grotesk text-sm w-44 shrink-0">{m.module}</span>
               <div className="flex flex-wrap gap-1.5">
-                {m(m.apis || []).map((a) => {
+                {(m.apis || []).map((a) => {
                   const it = data.integrations.find((x) => x.id === a)
                   return <Badge key={a} variant="outline" className="border-white/10 text-[10px] gap-1"><StatusDot status={it?.status || 'disabled'} /> {it?.name || a}</Badge>
                 })}
@@ -867,10 +1047,102 @@ function AnalyticsView() {
   )
 }
 
+// ================================================================== JARVIS VOICE ASSISTANT
+// Real wake-word voice assistant using the Web Speech API.
+// Listens for "Hey Jarvis" (or custom wake word), parses commands, executes
+// them (navigate, generate, publish, schedule), and speaks responses.
+function getSpeechRecognition() {
+  if (typeof window === 'undefined') return null
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  return SR ? new SR() : null
+}
+function speak(text, honorific = 'Boss') {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
+  try {
+    window.speechSynthesis.cancel()
+    const u = new SpeechSynthesisUtterance(`Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, ${honorific}. ${text}`)
+    u.rate = 1; u.pitch = 1
+    window.speechSynthesis.speak(u)
+  } catch {}
+}
+
+// Voice command engine — maps spoken phrases to app actions
+function VoiceAssistant({ enabled, wakeWord, honorific, go, onStatus }) {
+  const recRef = useRef(null)
+  const listeningRef = useRef(false)
+  const [heard, setHeard] = useState('')
+
+  const handleCommand = (transcript) => {
+    const t = transcript.toLowerCase()
+    setHeard(transcript)
+    // Wake word check
+    const ww = (wakeWord || 'hey jarvis').toLowerCase()
+    if (!t.includes(ww)) return
+    const cmd = t.replace(ww, '').trim()
+    const say = (msg) => speak(msg, honorific)
+
+    if (!cmd) { say('How can I help you?'); return }
+
+    // Navigation commands
+    if (cmd.includes('dashboard') || cmd.includes('command center')) { go('dashboard'); say('Opening the command center.') }
+    else if (cmd.includes('social') || cmd.includes('generate') || cmd.includes('post')) { go('social'); say('Opening social automation.') }
+    else if (cmd.includes('blog') || cmd.includes('article')) { go('blog'); say('Opening the blog engine.') }
+    else if (cmd.includes('news') || cmd.includes('radar')) { go('news'); say('Opening the news radar.') }
+    else if (cmd.includes('analytics') || cmd.includes('performance')) { go('analytics'); say('Opening analytics.') }
+    else if (cmd.includes('calendar') || cmd.includes('schedule')) { go('calendar'); say('Opening the content calendar.') }
+    else if (cmd.includes('integrations') || cmd.includes('connections')) { go('integrations'); say('Opening integrations.') }
+    else if (cmd.includes('newsletter') || cmd.includes('email')) { go('newsletter'); say('Opening the newsletter.') }
+    else if (cmd.includes('audit') || cmd.includes('log')) { go('audit'); say('Opening the audit log.') }
+    else if (cmd.includes('autopilot') || cmd.includes('auto pilot')) { go('autopilot'); say('Opening auto pilot.') }
+    else if (cmd.includes('learning')) { go('learning'); say('Opening the learning engine.') }
+    else if (cmd.includes('mission')) { go('mission_control'); say('Opening mission control.') }
+    else if (cmd.includes('vault') || cmd.includes('idea')) { go('idea_vault'); say('Opening the idea vault.') }
+    else if (cmd.includes('repurpose')) { go('repurposing'); say('Opening the repurposing engine.') }
+    else if (cmd.includes('seasonal')) { go('seasonal'); say('Opening seasonal campaigns.') }
+    else if (cmd.includes('portfolio')) { go('portfolio'); say('Opening portfolio sync.') }
+    else if (cmd.includes('recruiter')) { go('recruiter'); say('Opening recruiter signal.') }
+    else if (cmd.includes('versions') || cmd.includes('history')) { go('versions'); say('Opening version history.') }
+    else if (cmd.includes('discord')) { go('discord'); say('Opening the discord hub.') }
+    else if (cmd.includes('cost') || cmd.includes('budget')) { go('ai_cost'); say('Opening the AI cost dashboard.') }
+    else if (cmd.includes('fact') || cmd.includes('check')) { go('factcheck'); say('Opening the fact check pass.') }
+    else if (cmd.includes('brand')) { go('brand'); say('Opening brand intelligence.') }
+    else if (cmd.includes('engage') || cmd.includes('comment')) { go('linkedin_engage'); say('Opening LinkedIn engagement.') }
+    else if (cmd.includes('assistant') || cmd.includes('jarvis')) { go('assistant'); say('I am here, ' + honorific + '.') }
+    // Action commands
+    else if (cmd.includes('publish') || cmd.includes('approve')) { go('social'); say('Opening pending approvals for you to review.') }
+    else if (cmd.includes('turn off') || cmd.includes('stop listening')) { onStatus && onStatus(false); say('Voice commands turned off.') }
+    else if (cmd.includes('hello') || cmd.includes('hi ') || cmd.includes('hey')) { say('Hello! I am ready to help.') }
+    else { say('I heard you, but I did not understand that command. Try saying, open social, or open analytics.') }
+  }
+
+  useEffect(() => {
+    if (!enabled) { if (recRef.current) { try { recRef.current.stop() } catch {} } return }
+    const rec = getSpeechRecognition()
+    if (!rec) { onStatus && onStatus(false); return }
+    recRef.current = rec
+    rec.continuous = true
+    rec.interimResults = false
+    rec.lang = 'en-IN'
+    rec.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript
+        handleCommand(t)
+      }
+    }
+    rec.onerror = (e) => { if (e.error === 'not-allowed') { onStatus && onStatus(false) } }
+    rec.onend = () => { if (enabled && listeningRef.current) { try { rec.start() } catch {} } }
+    try { rec.start(); listeningRef.current = true } catch {}
+    return () => { listeningRef.current = false; try { rec.stop() } catch {} }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, wakeWord, honorific])
+
+  return null
+}
+
 // ================================================================== JARVIS / PWA
-function AssistantView() {
+function AssistantView({ voiceEnabled, setVoiceEnabled, wakeWord, setWakeWord, honorific, setHonorific }) {
   const [a, setA] = useState(null)
-  useEffect(() => { api('/assistant').then((r) => setA(r.assistant)).catch(() => {}) }, [])
+  useEffect(() => { api('/assistant').then((r) => { setA(r.assistant); if (r.assistant?.wakeWord) setWakeWord(r.assistant.wakeWord); if (r.assistant?.honorific) setHonorific(r.assistant.honorific); if (r.assistant?.voiceEnabled !== undefined) setVoiceEnabled(r.assistant.voiceEnabled) }).catch(() => {}) }, [])
   const update = async (patch) => { const next = { ...a, ...patch }; setA(next); await api('/assistant', { method: 'PUT', body: JSON.stringify({ assistant: next }) }); toast.success(patch.voiceEnabled === false ? 'Voice commands off, Boss.' : patch.voiceEnabled === true ? 'Voice commands back on, Boss.' : 'Saved') }
   if (!a) return <Loading />
   return (
@@ -879,13 +1151,16 @@ function AssistantView() {
       <div className="grid lg:grid-cols-2 gap-6">
         <Panel className="p-5 space-y-4">
           <h3 className="font-display font-semibold flex items-center gap-2"><Mic className="h-4 w-4 text-blue-400" /> Assistant Config</h3>
-          <Field label="Wake word"><Input value={a.wakeWord} onChange={(e) => setA({ ...a, wakeWord: e.target.value })} onBlur={() => update({ wakeWord: a.wakeWord })} className="bg-secondary/50 border-white/10" /></Field>
-          <Field label="Honorific"><Input value={a.honorific} onChange={(e) => setA({ ...a, honorific: e.target.value })} onBlur={() => update({ honorific: a.honorific })} className="bg-secondary/50 border-white/10" /></Field>
+          <Field label="Wake word"><Input value={wakeWord} onChange={(e) => setWakeWord(e.target.value)} onBlur={() => update({ wakeWord })} className="bg-secondary/50 border-white/10" /></Field>
+          <Field label="Honorific"><Input value={honorific} onChange={(e) => setHonorific(e.target.value)} onBlur={() => update({ honorific })} className="bg-secondary/50 border-white/10" /></Field>
           <div className="flex items-center justify-between glass rounded-lg p-4">
             <div><div className="font-grotesk text-sm">Voice commands</div><div className="text-xs text-muted-foreground">Self-toggling wake-word listener</div></div>
-            <Switch checked={a.voiceEnabled} onCheckedChange={(v) => update({ voiceEnabled: v })} />
+            <Switch checked={voiceEnabled} onCheckedChange={(v) => { setVoiceEnabled(v); update({ voiceEnabled: v }) }} />
           </div>
-          <div className="glass rounded-lg p-4 text-sm"><span className="text-muted-foreground">Standing greeting preview: </span><span className="text-gradient font-grotesk">"Good morning, {a.honorific}."</span></div>
+          <div className="glass rounded-lg p-4 text-sm"><span className="text-muted-foreground">Standing greeting preview: </span><span className="text-gradient font-grotesk">"Good morning, {honorific}."</span></div>
+          <div className={`glass rounded-lg p-3 text-xs ${voiceEnabled ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+            {voiceEnabled ? '● Listening for "' + wakeWord + '" — say it then a command' : 'Voice listener is off. Toggle it on to enable.'}
+          </div>
         </Panel>
         <Panel className="p-5 space-y-3">
           <h3 className="font-display font-semibold flex items-center gap-2"><Fingerprint className="h-4 w-4 text-emerald-400" /> Security Gates</h3>
@@ -895,7 +1170,7 @@ function AssistantView() {
           <div className="pt-2 text-xs text-muted-foreground">Google Sign-In, WebAuthn biometrics and TOTP activate on your production HTTPS domain. Wake-word + push notifications initialize when the PWA is installed to your home screen.</div>
         </Panel>
       </div>
-      <Panel className="p-5"><h3 className="font-display font-semibold mb-3">Voice Commands</h3><div className="grid sm:grid-cols-2 gap-2">{['"Hey Jarvis, generate tomorrow\u2019s LinkedIn post"', '"Publish today\u2019s blog"', '"Schedule everything"', '"Show my best LinkedIn post this month"', '"Why did yesterday\u2019s post fail?"', '"Turn off voice commands"'].map((c) => <div key={c} className="glass rounded-lg px-3 py-2 text-sm text-muted-foreground font-grotesk">{c}</div>)}</div></Panel>
+      <Panel className="p-5"><h3 className="font-display font-semibold mb-3">Voice Commands</h3><div className="grid sm:grid-cols-2 gap-2">{['"Hey Jarvis, open social"', '"Hey Jarvis, open analytics"', '"Hey Jarvis, open the blog engine"', '"Hey Jarvis, open news radar"', '"Hey Jarvis, open calendar"', '"Hey Jarvis, turn off voice commands"'].map((c) => <div key={c} className="glass rounded-lg px-3 py-2 text-sm text-muted-foreground font-grotesk">{c}</div>)}</div></Panel>
     </div>
   )
 }
@@ -2571,6 +2846,9 @@ function Shell({ user, onLogout }) {
   const [view, setView] = useState(() => (typeof window !== 'undefined' && window.location.hash === '#integrations' ? 'integrations' : 'dashboard'))
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [voiceEnabled, setVoiceEnabled] = useState(false)
+  const [wakeWord, setWakeWord] = useState('Hey Jarvis')
+  const [honorific, setHonorific] = useState('Boss')
   const go = (v) => { setView(v); setMobileOpen(false); if (typeof window !== 'undefined') history.replaceState(null, '', v === 'dashboard' ? '/' : `/#${v}`) }
 
   const render = () => {
@@ -2592,7 +2870,7 @@ function Shell({ user, onLogout }) {
       case 'recruiter': return <RecruiterView />
       case 'portfolio': return <PortfolioView />
       case 'integrations': return <IntegrationsView />
-      case 'assistant': return <AssistantView />
+      case 'assistant': return <AssistantView voiceEnabled={voiceEnabled} setVoiceEnabled={setVoiceEnabled} wakeWord={wakeWord} setWakeWord={setWakeWord} honorific={honorific} setHonorific={setHonorific} />
       case 'audit': return <AuditView />
       case 'scheduler': return <SchedulerView />
       case 'discord': return <DiscordView />
@@ -2651,6 +2929,13 @@ function Shell({ user, onLogout }) {
         )}
       </AnimatePresence>
 
+      <VoiceAssistant
+        enabled={voiceEnabled}
+        wakeWord={wakeWord}
+        honorific={honorific}
+        go={go}
+        onStatus={setVoiceEnabled}
+      />
       <div className="flex-1 flex flex-col min-w-0">
         {/* topbar */}
         <header className="h-16 glass-strong border-b border-white/5 flex items-center gap-3 px-4 sticky top-0 z-30">
@@ -2712,6 +2997,8 @@ function App() {
     try { const u = localStorage.getItem('nexus_user'); const t = localStorage.getItem('nexus_token'); return (u && t) ? JSON.parse(u) : null } catch { return null }
   })
   const [ready, setReady] = useState(false)
+  const [faceVerified, setFaceVerified] = useState(false)
+  const [showFace, setShowFace] = useState(false)
   useEffect(() => {
     const t = localStorage.getItem('nexus_token'); const u = localStorage.getItem('nexus_user')
     if (t && u) {
@@ -2722,10 +3009,41 @@ function App() {
     }
     setReady(true)
   }, [])
-  const logout = () => { localStorage.removeItem('nexus_token'); localStorage.removeItem('nexus_user'); setUser(null); toast.success('Session ended') }
+  // Re-verify face whenever the window regains focus (session security)
+  useEffect(() => {
+    if (!user) return
+    const onFocus = () => {
+      // Only re-prompt if the app is already open (not during initial login flow)
+      if (faceVerified) setShowFace(true)
+    }
+    window.addEventListener('focus', onFocus)
+    const onVisibility = () => { if (document.visibilityState === 'visible' && faceVerified) setShowFace(true) }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [user, faceVerified])
+  const logout = () => { localStorage.removeItem('nexus_token'); localStorage.removeItem('nexus_user'); setUser(null); setFaceVerified(false); toast.success('Session ended') }
   if (!ready) return <div className="min-h-screen grid-bg grid place-items-center"><Loader2 className="h-8 w-8 animate-spin text-blue-400" /></div>
   if (!user) return <Login onLogin={setUser} />
-  return <Shell user={user} onLogout={logout} />
+  if (!faceVerified) {
+    return <FaceGate
+      onVerified={() => { setFaceVerified(true); setShowFace(false); toast.success('Identity verified') }}
+      onSkip={() => { setFaceVerified(true); setShowFace(false); toast.info('Face verification skipped for this session') }}
+    />
+  }
+  return (
+    <>
+      {showFace && (
+        <FaceGate
+          onVerified={() => { setFaceVerified(true); setShowFace(false) }}
+          onSkip={() => setShowFace(false)}
+        />
+      )}
+      <Shell user={user} onLogout={logout} />
+    </>
+  )
 }
 
 export default App

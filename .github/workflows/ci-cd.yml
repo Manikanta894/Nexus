@@ -1,10 +1,10 @@
-name: CI/CD — Build, Test, Deploy
+name: CI/CD
 
 on:
   push:
-    branches: [master, main]
+    branches: [main, master]
   pull_request:
-    branches: [master, main]
+    branches: [main, master]
 
 jobs:
   build:
@@ -13,16 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-      - run: npm ci || npm install
-      - run: npm run build
-      - name: Verify build
-        run: |
-          if [ -d ".next" ]; then
-            echo "✅ Build successful"
-            ls -la .next/
-          else
-            echo "❌ Build failed"
-            exit 1
-          fi
+          node-version: 20
+          cache: 'yarn'
+      - run: yarn install --frozen-lockfile
+      - run: yarn build
