@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { verifyInteractionRequest, interactionAck, INTERACTION_TYPES, sendApprovalCard, editInteractionMessage, makeButtons, buildEmbed, COLOR } from '../../../lib/discord.js'
 import { encrypt, decrypt } from '../../../lib/social-post.js'
 import { SEED_EVENTS } from '../../../lib/events.js'
+import { estimateReach } from '../../../lib/pipeline.js'
 
 const SECRET = process.env.APP_SECRET || 'dev-fallback'
 const json = (data, status = 200) => NextResponse.json(data, { status })
@@ -389,7 +390,7 @@ async function handle(request) {
     if (body.action === 'edit' || body.action === 'regenerate') {
       post.versions.push({ v: post.versions.length + 1, action: body.action, snapshot: JSON.parse(JSON.stringify(post.platforms)), ts: now })
     }
-    if (body.action === 'approve') { post.status = 'Published'; post.publishedAt = now }
+    if (body.action === 'approve') { post.status = 'Published'; post.publishedAt = now; if (!post.analytics) post.analytics = estimateReach(post) }
     else if (body.action === 'reject') post.status = 'Rejected'
     else if (body.action === 'skip') post.status = 'Skipped'
     else if (body.action === 'schedule') { post.status = 'Scheduled'; post.scheduledAt = body.scheduledAt || now }
@@ -507,8 +508,16 @@ async function handle(request) {
     for (const p of published) { perPillar[p.analysis?.pillar] = (perPillar[p.analysis?.pillar] || 0) + 1; for (const plat of (p.selectedPlatforms || [])) if (perPlatform[plat] !== undefined) perPlatform[plat]++ }
     const hashtagMap = {}
     for (const p of published) for (const plat of (p.selectedPlatforms || [])) for (const tag of (p.platforms?.[plat]?.hashtags || [])) hashtagMap[tag] = (hashtagMap[tag] || 0) + 1
+    // PRD Social Step 12 — sum the full metric set per published post (per-post analytics if
+    // stamped, else quality-based estimate) so the dashboard tracks the complete lifecycle.
+    const sum = (key) => published.reduce((acc, p) => acc + (p.analytics?.[key] ?? estimateReach(p)[key] ?? 0), 0)
+    const totals = {
+      reach: sum('reach'), impressions: sum('impressions'), likes: sum('likes'), comments: sum('comments'),
+      shares: sum('shares'), saves: sum('saves'), followersGained: sum('followersGained'),
+      websiteClicks: sum('websiteClicks'), profileVisits: sum('profileVisits'), publishedCount: published.length,
+    }
     return {
-      totals: { reach: published.length * 200, engagementRate: '5.2', followersGained: published.length * 12, websiteVisits: published.length * 45, publishedCount: published.length },
+      totals,
       perPillar: Object.entries(perPillar).map(([name, v]) => ({ name, v })),
       perPlatform: Object.entries(perPlatform).map(([name, v]) => ({ name, v })),
       timeline: Array.from({ length: 14 }, (_, i) => ({ day: `08-${String(i + 1).padStart(2, '0')}`, reach: 100 + i * 20, engagement: 5 + Math.random() * 10 })),
@@ -600,14 +609,18 @@ async function handle(request) {
     if (pub.ok) {
       post.status = 'Published'
       post.publishedAt = new Date().toISOString()
+      if (!post.analytics) post.analytics = estimateReach(post)
+      post.publish = { at: post.publishedAt, results: pub.results, notifications: pub.notifications || [] }
       await archiveImage(db, post.imageId, {}).catch(() => {})
-      audit(user.sub, 'pipeline.publish', { id: post.id, ok: true })
+      audit(user.sub, 'pipeline.publish', { id: post.id, ok: true, platforms: post.selectedPlatforms })
     } else {
       post.status = 'Failed'
       post.lastError = Object.values(pub.results).find((r) => !r.ok)?.error || 'Publish failed'
+      // PRD Social Step 10 — surface the retry + failure notifications so the user is informed.
+      post.publish = { at: new Date().toISOString(), results: pub.results, notifications: pub.notifications || [] }
       audit(user.sub, 'pipeline.publish', { id: post.id, ok: false, error: post.lastError })
     }
-    return json({ ok: pub.ok, results: pub.results, job: post })
+    return json({ ok: pub.ok, results: pub.results, notifications: pub.notifications || [], job: post })
   }
   if (route === '/pipeline/status' && method === 'GET') {
     const { learningInsights } = await import('../../../lib/pipeline.js')
@@ -718,9 +731,38 @@ async function handle(request) {
     db.newsletter_campaigns.push(campaign)
     return json({ campaign })
   }
+  if (route === '/newsletter/action' && method === 'POST') {
+    const body = await request.json().catch(() => ({}))
+    const camp = db.newsletter_campaigns.find(c => c.id === body.id)
+    if (!camp) return json({ error: 'Campaign not found' }, 404)
+    if (body.action === 'approve') {
+      camp.status = 'Approved'; camp.approvedAt = new Date().toISOString()
+      audit(user.sub, 'newsletter.approve', { id: camp.id })
+      return json({ ok: true, campaign: camp })
+    }
+    if (body.action === 'reject') {
+      camp.status = 'Rejected'; camp.rejectedAt = new Date().toISOString()
+      audit(user.sub, 'newsletter.reject', { id: camp.id })
+      return json({ ok: true, campaign: camp })
+    }
+    if (body.action === 'edit') {
+      if (body.subject !== undefined) camp.subject = body.subject
+      if (body.preview !== undefined) camp.preview = body.preview
+      if (body.body !== undefined) camp.body = body.body
+      if (body.template !== undefined) camp.template = body.template
+      camp.status = 'Draft'; camp.updatedAt = new Date().toISOString()
+      audit(user.sub, 'newsletter.edit', { id: camp.id })
+      return json({ ok: true, campaign: camp })
+    }
+    return json({ error: 'Unknown action' }, 400)
+  }
   if (route === '/newsletter/send' && method === 'POST') {
     const body = await request.json().catch(() => ({}))
     const camp = db.newsletter_campaigns.find(c => c.id === body.id)
+    // PRD Blog Step 11 — a newsletter must be APPROVED before it can be sent.
+    if (camp && camp.status !== 'Approved') {
+      return json({ error: `Campaign is ${camp.status || 'Draft'} — approve it before sending`, status: camp.status }, 409)
+    }
     const resend = findIntegration('resend')
     const key = resend?.fields?.apiKey ? decrypt(resend.fields.apiKey) : ''
     const from = resend?.fields?.fromEmail

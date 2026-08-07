@@ -292,7 +292,18 @@ export default function MissionControl({ go }) {
       }
       if (news.status === 'fulfilled') {
         const gen = newsArr.filter(n => n.status === 'Generated')
-        setNews((n) => ({ ...(n || {}), lastScan: n?.lastScan || nowISO(), nextScan: n?.nextScan || nowISO(), scanned: 48 + newsArr.length, relevant: newsArr.filter(x => (x.score?.overall || 50) >= 60).length, ignored: newsArr.filter(x => x.status === 'Ignored').length, pending: newsArr.filter(x => x.status === 'Pending').length, generatedSocial: gen.length, generatedBlog: gen.filter(x => x.blogJobId).length, recommendation: Math.round((newsArr.reduce((a, x) => a + (x.score?.overall || 50), 0) / Math.max(1, newsArr.length))))
+        setNews((n) => ({
+          ...(n || {}),
+          lastScan: n?.lastScan || nowISO(),
+          nextScan: n?.nextScan || nowISO(),
+          scanned: 48 + newsArr.length,
+          relevant: newsArr.filter((x) => (x.score?.overall || 50) >= 60).length,
+          ignored: newsArr.filter((x) => x.status === 'Ignored').length,
+          pending: newsArr.filter((x) => x.status === 'Pending').length,
+          generatedSocial: gen.length,
+          generatedBlog: gen.filter((x) => x.blogJobId).length,
+          recommendation: Math.round(newsArr.reduce((a, x) => a + (x.score?.overall || 50), 0) / Math.max(1, newsArr.length)),
+        }))
       }
       if (camps.status === 'fulfilled') {
         setSeasonal({

@@ -191,10 +191,20 @@ async function test(name, fn) {
     return r.status === 200 && !!r.data.campaign?.subject
   })
   let campaignId = null
-  await test('newsletter campaign create', async () => {
+  await test('newsletter campaign create (Draft)', async () => {
     const r = await req('/newsletter/campaign', { method: 'POST', body: { subject: 'Test digest', preview: 'preview', body: '<p>body</p>', template: 'Weekly Digest' } })
-    if (r.status === 200 && r.data.campaign?.id) campaignId = r.data.campaign.id
-    return r.status === 200
+    if (r.status === 200 && r.data.campaign?.id && r.data.campaign.status === 'Draft') campaignId = r.data.campaign.id
+    return r.status === 200 && r.data.campaign?.status === 'Draft'
+  })
+  await test('newsletter send blocked until approved (409)', async () => {
+    if (!campaignId) return true
+    const r = await req('/newsletter/send', { method: 'POST', body: { id: campaignId } })
+    return r.status === 409
+  })
+  await test('newsletter approve', async () => {
+    if (!campaignId) return true
+    const r = await req('/newsletter/action', { method: 'POST', body: { id: campaignId, action: 'approve' } })
+    return r.status === 200 && r.data.campaign?.status === 'Approved'
   })
   await test('newsletter send (demo)', async () => {
     if (!campaignId) return true
