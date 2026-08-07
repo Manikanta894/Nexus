@@ -728,7 +728,7 @@ function IntegrationsView() {
         <h3 className="font-display font-semibold mb-1 flex items-center gap-2"><Layers className="h-4 w-4 text-violet-400" /> Automation Dependency Map</h3>
         <p className="text-xs text-muted-foreground mb-4">Which APIs each module depends on — a single failure shows its full blast radius.</p>
         <div className="space-y-2">
-          {data(d.dependencyMap || []).map((m) => (
+          {(data.dependencyMap || []).map((m) => (
             <div key={m.module} className="flex flex-wrap items-center gap-2 glass rounded-lg p-3">
               <span className="font-grotesk text-sm w-44 shrink-0">{m.module}</span>
               <div className="flex flex-wrap gap-1.5">
