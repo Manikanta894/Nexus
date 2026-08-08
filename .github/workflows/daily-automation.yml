@@ -1,0 +1,22 @@
+name: Daily Automation 24/7
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # 8 AM daily
+  workflow_dispatch:
+
+jobs:
+  full-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run full pipeline (social + blog + news)
+        run: |
+          curl -sS -X POST "${{ secrets.APP_URL }}/api/autopilot/run" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
+            -d '{"seedText":"AI in business"}' \
+            -w "\nHTTP %{http_code}\n"
+          curl -sS -X POST "${{ secrets.APP_URL }}/api/news/scan" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
+            -w "\nHTTP %{http_code}\n"

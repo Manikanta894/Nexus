@@ -1,47 +1,18 @@
-name: Blog Automation — 3x Daily
+name: Blog Automation 24/7
 
 on:
   schedule:
-    - cron: '55 8 * * *'    # 8:55 AM → blog at 9:00 AM
-    - cron: '55 13 * * *'   # 1:55 PM → blog at 2:00 PM
-    - cron: '55 18 * * *'   # 6:55 PM → blog at 7:00 PM
+    - cron: '0 10 * * 1,3,5'  # Mon/Wed/Fri 10 AM
+  workflow_dispatch:
 
 jobs:
   generate-blog:
     runs-on: ubuntu-latest
     steps:
-      - name: Auto-Generate Blog
+      - name: Auto-generate blog + newsletter
         run: |
-          TOPICS=("AI in business" "Leadership lessons" "HR trends 2026" "Career growth" "Productivity systems" "MBA insights" "Data analytics" "Future of work")
-          TOPIC=${TOPICS[$RANDOM % ${#TOPICS[@]}]}
-          echo "Topic: $TOPIC"
-          RESP=$(curl -s -X POST "${{ secrets.APP_URL }}/api/blog/generate" \
+          curl -sS -X POST "${{ secrets.APP_URL }}/api/blog/generate" \
+            -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"seedText\":\"$TOPIC\"}")
-          JOB_ID=$(echo "$RESP" | jq -r '.job.id')
-          if [ "$JOB_ID" != "null" ] && [ "$JOB_ID" != "" ]; then
-            echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
-            echo "✅ Blog draft: $JOB_ID"
-          else
-            echo "❌ Blog generation failed"
-            exit 1
-          fi
-        id: blog
-
-      - name: Schedule Blog for Exact Time
-        if: success()
-        run: |
-          TARGET=$(date -d "+5 minutes" --utc +%Y-%m-%dT%H:%M:%SZ)
-          curl -s -X POST "${{ secrets.APP_URL }}/api/blog/action" \
-            -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"id\":\"${{ steps.blog.outputs.job_id }}\",\"action\":\"schedule\",\"scheduledAt\":\"$TARGET\"}"
-          echo "📅 Scheduled for $TARGET"
-
-      - name: Notify Discord
-        if: success()
-        run: |
-          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"content\":\"📝 New blog generated — approve in Discord to auto-publish\"}" || true
+            -d '{"seedText":"AI in business"}' \
+            -w "\nHTTP %{http_code}\n"

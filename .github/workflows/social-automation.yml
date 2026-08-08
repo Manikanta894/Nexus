@@ -1,46 +1,18 @@
-name: Social Automation — 5x Daily
+name: Social Automation 24/7
 
 on:
   schedule:
-    - cron: '55 6 * * *'   # 6:55 AM → post at 7:00 AM
-    - cron: '55 9 * * *'   # 9:55 AM → post at 10:00 AM
-    - cron: '55 12 * * *'  # 12:55 PM → post at 1:00 PM
-    - cron: '55 15 * * *'  # 3:55 PM → post at 4:00 PM
-    - cron: '55 18 * * *'  # 6:55 PM → post at 7:00 PM
+    - cron: '*/30 * * * *'  # Every 30 min — pipeline only fires at the 5 scheduled slots (5 posts/day)
+  workflow_dispatch:
 
 jobs:
   generate-social:
     runs-on: ubuntu-latest
     steps:
-      - name: Auto-Generate Social Post
+      - name: Trigger Social Pipeline (respects schedule — 5 posts/day)
         run: |
-          RESP=$(curl -s -X POST "${{ secrets.APP_URL }}/api/social/generate" \
+          curl -sS -X POST "${{ secrets.APP_URL }}/api/pipeline/run" \
+            -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{"platforms":["linkedin","instagram","facebook","threads"]}')
-          JOB_ID=$(echo "$RESP" | jq -r '.job.id')
-          if [ "$JOB_ID" != "null" ] && [ "$JOB_ID" != "" ]; then
-            echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
-            echo "✅ Social draft: $JOB_ID"
-          else
-            echo "❌ Generation failed"
-            exit 1
-          fi
-        id: generate
-
-      - name: Schedule Post for Exact Time
-        if: success()
-        run: |
-          TARGET=$(date -d "+5 minutes" --utc +%Y-%m-%dT%H:%M:%SZ)
-          curl -s -X POST "${{ secrets.APP_URL }}/api/social/action" \
-            -H "Authorization: Bearer ${{ secrets.NEXUS_API_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"id\":\"${{ steps.generate.outputs.job_id }}\",\"action\":\"schedule\",\"scheduledAt\":\"$TARGET\"}"
-          echo "📅 Scheduled for $TARGET"
-
-      - name: Notify Discord
-        if: success()
-        run: |
-          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"content\":\"📱 New social post generated — approve in Discord to auto-publish\"}" || true
+            -d '{"module":"social","respectSchedule":true,"source":"autopilot"}' \
+            -w "\nHTTP %{http_code}\n"

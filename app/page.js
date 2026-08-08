@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import {
@@ -14,7 +14,7 @@ import {
   Zap, Activity, ChevronLeft, Cpu, TrendingUp, Users, Eye, Send, Save, Trash2, Play,
   Star, Rocket, Newspaper, Mic, Fingerprint, Loader2, Copy, ExternalLink, Globe, Github,
   Triangle, Linkedin, Facebook, Instagram, MessageCircle, CircleDot, Layers, Award, ImageIcon,
-  Lock, Wand2, Plus, Filter, ShieldAlert, Wallet, BookOpen, Hash,
+  Lock, Wand2, Plus, Filter, ShieldAlert, Wallet, BookOpen, Hash, ScanFace, ScanEye, Settings2, ShieldCheck as ShieldIcon,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -35,6 +35,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 // unblocking ping at 500ms if the request hasn't settled; (3) hard-abort at
 // 12s and retry GETs once on a fresh connection.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const safeArr = (v) => Array.isArray(v) ? v : []
 
 const ping = (() => {
   let last = 0
@@ -197,6 +198,196 @@ function Login({ onLogin }) {
   )
 }
 
+// ================================================================== FACE + EYEBALL VERIFICATION
+// Face verification uses the WebAuthn API (Face ID / Touch ID / Windows Hello /
+// platform biometrics). Falls back to a PIN if biometrics are unavailable.
+const FACE_KEY = 'nexus_face_credential'
+const FACE_PIN = 'nexus_face_pin'
+
+function isWebAuthnAvailable() {
+  return typeof window !== 'undefined' && !!window.PublicKeyCredential && !!navigator.credentials
+}
+
+async function registerBiometric() {
+  if (!isWebAuthnAvailable()) return { ok: false, reason: 'unsupported' }
+  try {
+    const challenge = crypto.getRandomValues(new Uint8Array(32))
+    const cred = await navigator.credentials.create({
+      publicKey: {
+        challenge,
+        rp: { name: 'NEXUS Command Center' },
+        user: { id: new Uint8Array(16), name: 'admin', displayName: 'Manikanta R' },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+        timeout: 60000,
+      },
+    })
+    if (cred) {
+      localStorage.setItem(FACE_KEY, 'registered')
+      return { ok: true }
+    }
+    return { ok: false, reason: 'cancelled' }
+  } catch (e) {
+    return { ok: false, reason: e.name === 'NotAllowedError' ? 'cancelled' : 'unsupported' }
+  }
+}
+
+async function verifyBiometric() {
+  if (!isWebAuthnAvailable()) return { ok: false, reason: 'unsupported' }
+  try {
+    const challenge = crypto.getRandomValues(new Uint8Array(32))
+    const cred = await navigator.credentials.get({
+      publicKey: {
+        challenge,
+        rpId: window.location.hostname,
+        userVerification: 'required',
+        timeout: 60000,
+      },
+    })
+    return cred ? { ok: true } : { ok: false, reason: 'cancelled' }
+  } catch (e) {
+    return { ok: false, reason: e.name === 'NotAllowedError' ? 'cancelled' : 'unsupported' }
+  }
+}
+
+// Face verification gate — shown ONCE per session after login.
+// iOS Safari requires a user gesture for WebAuthn, so Face ID is enabled
+// via an explicit "Enable Face ID" button (never auto-registered in useEffect).
+function FaceGate({ onVerified, onSkip }) {
+  const [state, setState] = useState('checking') // checking | ready | pin | error | enabling
+  const [pin, setPin] = useState('')
+  const [msg, setMsg] = useState('')
+
+  // Jarvis announces the gate once
+  useEffect(() => {
+    speak('Face authentication required', 'Boss')
+    const registered = localStorage.getItem(FACE_KEY)
+    if (!isWebAuthnAvailable()) {
+      if (!localStorage.getItem(FACE_PIN)) { setState('pin'); setMsg('Set a 4-digit PIN — Face ID needs Safari on a secure (https) site') }
+      else { setState('pin'); setMsg('Enter your PIN') }
+      return
+    }
+    if (registered) { setState('ready'); setMsg('Face ID ready — tap to verify') }
+    else { setState('ready'); setMsg('Enable Face ID to unlock with your biometrics') }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Enable Face ID — MUST be triggered by a user tap for iOS to allow it
+  const enableFaceId = async () => {
+    setState('enabling'); setMsg('Setting up Face ID…')
+    const r = await registerBiometric()
+    if (r.ok) { setState('ready'); setMsg('Face ID enabled — tap to verify now') }
+    else {
+      setState('pin')
+      setMsg('Face ID needs Safari + a device passcode + https. Set a PIN instead.')
+    }
+  }
+
+  const doVerify = async () => {
+    setMsg('Verifying…')
+    const r = await verifyBiometric()
+    if (r.ok) { speak('Access granted'); toast.success('Identity verified'); onVerified(); return }
+    if (r.reason === 'unsupported') { setState('pin'); setMsg('Enter your PIN'); return }
+    setMsg('Verification cancelled — try again or use PIN')
+  }
+
+  const doPin = () => {
+    const stored = localStorage.getItem(FACE_PIN)
+    if (!stored) {
+      if (pin.length === 4) {
+        localStorage.setItem(FACE_PIN, pin)
+        if (isWebAuthnAvailable()) localStorage.setItem(FACE_KEY, 'registered') // remember choice
+        speak('Access granted'); toast.success('Identity verified'); onVerified(); return
+      }
+      setMsg('PIN must be 4 digits')
+      return
+    }
+    if (pin === stored) { speak('Access granted'); toast.success('Identity verified'); onVerified(); return }
+    setMsg('Incorrect PIN')
+  }
+
+  return (
+    <div className="min-h-screen grid-bg flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="glass-strong glow-blue rounded-2xl w-full max-w-md p-8 text-center">
+        <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-500 grid place-items-center mx-auto mb-4 glow-blue">
+          <ScanFace className="h-8 w-8 text-white" />
+        </div>
+        <h1 className="font-display text-xl font-bold mb-1">Identity Verification</h1>
+        <p className="text-sm text-muted-foreground mb-6">Face ID / biometric or PIN required to open the Command Center.</p>
+
+        {state === 'ready' && (
+          <div className="space-y-3">
+            {localStorage.getItem(FACE_KEY) ? (
+              <Button onClick={doVerify} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 h-11">
+                <ScanFace className="h-4 w-4 mr-2" /> Verify with Face ID
+              </Button>
+            ) : (
+              <Button onClick={enableFaceId} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 h-11">
+                <ScanFace className="h-4 w-4 mr-2" /> Enable Face ID
+              </Button>
+            )}
+            <Button variant="outline" className="w-full border-white/10" onClick={() => { setState('pin'); setMsg('Enter your PIN') }}>
+              Use PIN instead
+            </Button>
+          </div>
+        )}
+
+        {state === 'enabling' && (
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="h-6 w-6 animate-spin text-blue-400" />
+            <p className="text-sm text-muted-foreground">Unlock with Face ID to register…</p>
+          </div>
+        )}
+
+        {state === 'pin' && (
+          <div className="space-y-3">
+            <Input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => e.key === 'Enter' && doPin()} placeholder="••••" className="bg-secondary/50 border-white/10 font-code text-center text-2xl tracking-[0.5em]" />
+            <Button onClick={doPin} className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 h-11">
+              <Fingerprint className="h-4 w-4 mr-2" /> {localStorage.getItem(FACE_PIN) ? 'Verify PIN' : 'Set PIN'}
+            </Button>
+            {isWebAuthnAvailable() && <Button variant="outline" className="w-full border-white/10" onClick={() => { setState('ready'); setMsg(localStorage.getItem(FACE_KEY) ? 'Face ID ready — tap to verify' : 'Enable Face ID to unlock') }}>Use Face ID</Button>}
+          </div>
+        )}
+
+        {msg && <p className="text-xs text-amber-400 mt-4">{msg}</p>}
+        <button onClick={onSkip} className="text-xs text-muted-foreground hover:text-white mt-6 underline underline-offset-4">Skip for this session</button>
+      </motion.div>
+    </div>
+  )
+}
+
+// Eyeball verification — visual confirmation before high-impact actions
+function EyeballGate({ open, onConfirm, onCancel, title }) {
+  const [checked, setChecked] = useState(false)
+  const [hold, setHold] = useState(false)
+  useEffect(() => { if (open) { setChecked(false); setHold(false) } }, [open])
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent className="glass-strong border-white/10 max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-display flex items-center gap-2"><ScanEye className="h-5 w-5 text-emerald-400" /> Eyeball Verification</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">You are about to <span className="text-white font-medium">{title}</span>. This action is logged and cannot be undone without a manual revert.</p>
+        <div className="glass rounded-lg p-4 space-y-3">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} className="mt-1 h-4 w-4 accent-emerald-500" />
+            <span className="text-sm text-muted-foreground">I have <span className="text-white">eyeballed</span> the content on every platform tab and confirm it is accurate, on-brand, and ready to publish.</span>
+          </label>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <ShieldIcon className="h-3.5 w-3.5 text-emerald-400" /> This confirmation is recorded in the Audit Log.
+          </div>
+        </div>
+        <DialogFooter className="flex-row gap-2">
+          <Button onClick={onCancel} variant="outline" className="border-white/10 flex-1">Cancel</Button>
+          <Button onClick={() => { if (checked) onConfirm() }} disabled={!checked} className="flex-1 bg-emerald-600 hover:bg-emerald-500">
+            <Check className="h-4 w-4 mr-1" /> Confirm & Continue
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ================================================================== SHARED UI
 const StatusDot = ({ status }) => {
   const map = { connected: '#22C55E', expiring: '#F59E0B', expired: '#EF4444', disabled: '#6B7280' }
@@ -268,12 +459,23 @@ const STATUS_STYLES = {
 
 // Shared approval action bar — the same spine for every module
 function ActionBar({ job, onAct, onEdit, onRevert }) {
+  const [eyeballOpen, setEyeballOpen] = useState(false)
   const pending = ['Pending Approval', 'Scheduled'].includes(job?.status)
+  const doApprove = () => {
+    if (job?.factcheck?.status === 'Blocked') { toast.error('Blocked by Fact-Check gate'); return }
+    setEyeballOpen(true)
+  }
   return (
     <div className="flex flex-wrap items-center gap-2 p-4 border-t border-white/5 bg-secondary/20">
+      <EyeballGate
+        open={eyeballOpen}
+        title="publish this content to all selected platforms"
+        onCancel={() => setEyeballOpen(false)}
+        onConfirm={() => { setEyeballOpen(false); onAct('approve') }}
+      />
       {pending && (
         <>
-          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500" onClick={() => onAct('approve')}><Check className="h-4 w-4 mr-1" /> Approve & Publish</Button>
+          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500" onClick={doApprove}><Check className="h-4 w-4 mr-1" /> Approve & Publish</Button>
           <Button size="sm" variant="outline" className="border-white/10" onClick={() => onAct('regenerate')}><RefreshCw className="h-4 w-4 mr-1" /> Regenerate</Button>
           {onEdit && <Button size="sm" variant="outline" className="border-white/10" onClick={onEdit}><Pencil className="h-4 w-4 mr-1" /> Edit</Button>}
           <Button size="sm" variant="outline" className="border-white/10" onClick={() => onAct('schedule')}><Clock className="h-4 w-4 mr-1" /> Schedule</Button>
@@ -377,7 +579,7 @@ function DashboardView({ go }) {
         <Panel className="lg:col-span-2 p-5">
           <div className="flex items-center gap-2 mb-4"><Zap className="h-4 w-4 text-violet-400" /><h3 className="font-display font-semibold">System Health Strip</h3></div>
           <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-            {d.systemHealth.map((h) => {
+            {(d.systemHealth || []).map((h) => {
               const Ic = healthIcon[h.name] || Globe
               return (
                 <div key={h.name} className="glass rounded-lg p-3 flex flex-col items-center gap-2">
@@ -436,7 +638,7 @@ function SocialView() {
   const [draft, setDraft] = useState('')
   const fileRef = useRef()
 
-  const load = useCallback(() => { api('/social').then((r) => setPosts(r.posts)).catch(() => {}) }, [])
+  const load = useCallback(() => { api('/social').then((r) => setPosts(safeArr(r.posts))).catch(() => {}) }, [])
   useEffect(() => { load() }, [load])
 
   const selectedPlatforms = () => Object.keys(plats).filter((k) => plats[k])
@@ -662,7 +864,7 @@ function IntegrationsView() {
   const load = useCallback(() => { api('/integrations').then(setData).catch(() => {}) }, [])
   useEffect(() => { load() }, [load])
 
-  const open = (it) => { setActive(it); const f = {}; it.fieldsDef.forEach((fd) => { f[fd.key] = fd.secret ? '' : (it.values[fd.key] || '') }); setForm(f) }
+  const open = (it) => { setActive(it); const f = {}; (it.fields || []).forEach((fd) => { f[fd.key] = fd.secret ? '' : (it.values[fd.key] || '') }); setForm(f) }
   const save = async () => {
     setBusy(true)
     try { await api('/integrations/save', { method: 'POST', body: JSON.stringify({ id: active.id, fields: form, enabled: true }) }); toast.success(`${active.name} saved (encrypted)`); setActive(null); load() }
@@ -727,11 +929,11 @@ function IntegrationsView() {
         <h3 className="font-display font-semibold mb-1 flex items-center gap-2"><Layers className="h-4 w-4 text-violet-400" /> Automation Dependency Map</h3>
         <p className="text-xs text-muted-foreground mb-4">Which APIs each module depends on — a single failure shows its full blast radius.</p>
         <div className="space-y-2">
-          {data.dependencyMap.map((m) => (
+          {(data.dependencyMap || []).map((m) => (
             <div key={m.module} className="flex flex-wrap items-center gap-2 glass rounded-lg p-3">
               <span className="font-grotesk text-sm w-44 shrink-0">{m.module}</span>
               <div className="flex flex-wrap gap-1.5">
-                {m.apis.map((a) => {
+                {(m.apis || []).map((a) => {
                   const it = data.integrations.find((x) => x.id === a)
                   return <Badge key={a} variant="outline" className="border-white/10 text-[10px] gap-1"><StatusDot status={it?.status || 'disabled'} /> {it?.name || a}</Badge>
                 })}
@@ -746,7 +948,7 @@ function IntegrationsView() {
           <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Lock className="h-4 w-4 text-blue-400" /> {active?.name}</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground">{active?.desc} · docs: <span className="text-blue-400">{active?.docs}</span></p>
           <div className="space-y-3 py-2">
-            {active?.fieldsDef.map((fd) => (
+            {(active?.fields || []).map((fd) => (
               <div key={fd.key} className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">{fd.label}{fd.secret && <Lock className="h-3 w-3 inline ml-1" />}</Label>
                 {fd.textarea ? (
@@ -866,10 +1068,102 @@ function AnalyticsView() {
   )
 }
 
+// ================================================================== JARVIS VOICE ASSISTANT
+// Real wake-word voice assistant using the Web Speech API.
+// Listens for "Hey Jarvis" (or custom wake word), parses commands, executes
+// them (navigate, generate, publish, schedule), and speaks responses.
+function getSpeechRecognition() {
+  if (typeof window === 'undefined') return null
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  return SR ? new SR() : null
+}
+function speak(text, honorific = 'Boss') {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
+  try {
+    window.speechSynthesis.cancel()
+    const u = new SpeechSynthesisUtterance(`Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, ${honorific}. ${text}`)
+    u.rate = 1; u.pitch = 1
+    window.speechSynthesis.speak(u)
+  } catch {}
+}
+
+// Voice command engine — maps spoken phrases to app actions
+function VoiceAssistant({ enabled, wakeWord, honorific, go, onStatus }) {
+  const recRef = useRef(null)
+  const listeningRef = useRef(false)
+  const [heard, setHeard] = useState('')
+
+  const handleCommand = (transcript) => {
+    const t = transcript.toLowerCase()
+    setHeard(transcript)
+    // Wake word check
+    const ww = (wakeWord || 'hey jarvis').toLowerCase()
+    if (!t.includes(ww)) return
+    const cmd = t.replace(ww, '').trim()
+    const say = (msg) => speak(msg, honorific)
+
+    if (!cmd) { say('How can I help you?'); return }
+
+    // Navigation commands
+    if (cmd.includes('dashboard') || cmd.includes('command center')) { go('dashboard'); say('Opening the command center.') }
+    else if (cmd.includes('social') || cmd.includes('generate') || cmd.includes('post')) { go('social'); say('Opening social automation.') }
+    else if (cmd.includes('blog') || cmd.includes('article')) { go('blog'); say('Opening the blog engine.') }
+    else if (cmd.includes('news') || cmd.includes('radar')) { go('news'); say('Opening the news radar.') }
+    else if (cmd.includes('analytics') || cmd.includes('performance')) { go('analytics'); say('Opening analytics.') }
+    else if (cmd.includes('calendar') || cmd.includes('schedule')) { go('calendar'); say('Opening the content calendar.') }
+    else if (cmd.includes('integrations') || cmd.includes('connections')) { go('integrations'); say('Opening integrations.') }
+    else if (cmd.includes('newsletter') || cmd.includes('email')) { go('newsletter'); say('Opening the newsletter.') }
+    else if (cmd.includes('audit') || cmd.includes('log')) { go('audit'); say('Opening the audit log.') }
+    else if (cmd.includes('autopilot') || cmd.includes('auto pilot')) { go('autopilot'); say('Opening auto pilot.') }
+    else if (cmd.includes('learning')) { go('learning'); say('Opening the learning engine.') }
+    else if (cmd.includes('mission')) { go('mission_control'); say('Opening mission control.') }
+    else if (cmd.includes('vault') || cmd.includes('idea')) { go('idea_vault'); say('Opening the idea vault.') }
+    else if (cmd.includes('repurpose')) { go('repurposing'); say('Opening the repurposing engine.') }
+    else if (cmd.includes('seasonal')) { go('seasonal'); say('Opening seasonal campaigns.') }
+    else if (cmd.includes('portfolio')) { go('portfolio'); say('Opening portfolio sync.') }
+    else if (cmd.includes('recruiter')) { go('recruiter'); say('Opening recruiter signal.') }
+    else if (cmd.includes('versions') || cmd.includes('history')) { go('versions'); say('Opening version history.') }
+    else if (cmd.includes('discord')) { go('discord'); say('Opening the discord hub.') }
+    else if (cmd.includes('cost') || cmd.includes('budget')) { go('ai_cost'); say('Opening the AI cost dashboard.') }
+    else if (cmd.includes('fact') || cmd.includes('check')) { go('factcheck'); say('Opening the fact check pass.') }
+    else if (cmd.includes('brand')) { go('brand'); say('Opening brand intelligence.') }
+    else if (cmd.includes('engage') || cmd.includes('comment')) { go('linkedin_engage'); say('Opening LinkedIn engagement.') }
+    else if (cmd.includes('assistant') || cmd.includes('jarvis')) { go('assistant'); say('I am here, ' + honorific + '.') }
+    // Action commands
+    else if (cmd.includes('publish') || cmd.includes('approve')) { go('social'); say('Opening pending approvals for you to review.') }
+    else if (cmd.includes('turn off') || cmd.includes('stop listening')) { onStatus && onStatus(false); say('Voice commands turned off.') }
+    else if (cmd.includes('hello') || cmd.includes('hi ') || cmd.includes('hey')) { say('Hello! I am ready to help.') }
+    else { say('I heard you, but I did not understand that command. Try saying, open social, or open analytics.') }
+  }
+
+  useEffect(() => {
+    if (!enabled) { if (recRef.current) { try { recRef.current.stop() } catch {} } return }
+    const rec = getSpeechRecognition()
+    if (!rec) { onStatus && onStatus(false); return }
+    recRef.current = rec
+    rec.continuous = true
+    rec.interimResults = false
+    rec.lang = 'en-IN'
+    rec.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript
+        handleCommand(t)
+      }
+    }
+    rec.onerror = (e) => { if (e.error === 'not-allowed') { onStatus && onStatus(false) } }
+    rec.onend = () => { if (enabled && listeningRef.current) { try { rec.start() } catch {} } }
+    try { rec.start(); listeningRef.current = true } catch {}
+    return () => { listeningRef.current = false; try { rec.stop() } catch {} }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, wakeWord, honorific])
+
+  return null
+}
+
 // ================================================================== JARVIS / PWA
-function AssistantView() {
+function AssistantView({ voiceEnabled, setVoiceEnabled, wakeWord, setWakeWord, honorific, setHonorific }) {
   const [a, setA] = useState(null)
-  useEffect(() => { api('/assistant').then((r) => setA(r.assistant)).catch(() => {}) }, [])
+  useEffect(() => { api('/assistant').then((r) => { setA(r.assistant); if (r.assistant?.wakeWord) setWakeWord(r.assistant.wakeWord); if (r.assistant?.honorific) setHonorific(r.assistant.honorific); if (r.assistant?.voiceEnabled !== undefined) setVoiceEnabled(r.assistant.voiceEnabled) }).catch(() => {}) }, [])
   const update = async (patch) => { const next = { ...a, ...patch }; setA(next); await api('/assistant', { method: 'PUT', body: JSON.stringify({ assistant: next }) }); toast.success(patch.voiceEnabled === false ? 'Voice commands off, Boss.' : patch.voiceEnabled === true ? 'Voice commands back on, Boss.' : 'Saved') }
   if (!a) return <Loading />
   return (
@@ -878,13 +1172,16 @@ function AssistantView() {
       <div className="grid lg:grid-cols-2 gap-6">
         <Panel className="p-5 space-y-4">
           <h3 className="font-display font-semibold flex items-center gap-2"><Mic className="h-4 w-4 text-blue-400" /> Assistant Config</h3>
-          <Field label="Wake word"><Input value={a.wakeWord} onChange={(e) => setA({ ...a, wakeWord: e.target.value })} onBlur={() => update({ wakeWord: a.wakeWord })} className="bg-secondary/50 border-white/10" /></Field>
-          <Field label="Honorific"><Input value={a.honorific} onChange={(e) => setA({ ...a, honorific: e.target.value })} onBlur={() => update({ honorific: a.honorific })} className="bg-secondary/50 border-white/10" /></Field>
+          <Field label="Wake word"><Input value={wakeWord} onChange={(e) => setWakeWord(e.target.value)} onBlur={() => update({ wakeWord })} className="bg-secondary/50 border-white/10" /></Field>
+          <Field label="Honorific"><Input value={honorific} onChange={(e) => setHonorific(e.target.value)} onBlur={() => update({ honorific })} className="bg-secondary/50 border-white/10" /></Field>
           <div className="flex items-center justify-between glass rounded-lg p-4">
             <div><div className="font-grotesk text-sm">Voice commands</div><div className="text-xs text-muted-foreground">Self-toggling wake-word listener</div></div>
-            <Switch checked={a.voiceEnabled} onCheckedChange={(v) => update({ voiceEnabled: v })} />
+            <Switch checked={voiceEnabled} onCheckedChange={(v) => { setVoiceEnabled(v); update({ voiceEnabled: v }) }} />
           </div>
-          <div className="glass rounded-lg p-4 text-sm"><span className="text-muted-foreground">Standing greeting preview: </span><span className="text-gradient font-grotesk">"Good morning, {a.honorific}."</span></div>
+          <div className="glass rounded-lg p-4 text-sm"><span className="text-muted-foreground">Standing greeting preview: </span><span className="text-gradient font-grotesk">"Good morning, {honorific}."</span></div>
+          <div className={`glass rounded-lg p-3 text-xs ${voiceEnabled ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+            {voiceEnabled ? '● Listening for "' + wakeWord + '" — say it then a command' : 'Voice listener is off. Toggle it on to enable.'}
+          </div>
         </Panel>
         <Panel className="p-5 space-y-3">
           <h3 className="font-display font-semibold flex items-center gap-2"><Fingerprint className="h-4 w-4 text-emerald-400" /> Security Gates</h3>
@@ -894,7 +1191,7 @@ function AssistantView() {
           <div className="pt-2 text-xs text-muted-foreground">Google Sign-In, WebAuthn biometrics and TOTP activate on your production HTTPS domain. Wake-word + push notifications initialize when the PWA is installed to your home screen.</div>
         </Panel>
       </div>
-      <Panel className="p-5"><h3 className="font-display font-semibold mb-3">Voice Commands</h3><div className="grid sm:grid-cols-2 gap-2">{['"Hey Jarvis, generate tomorrow\u2019s LinkedIn post"', '"Publish today\u2019s blog"', '"Schedule everything"', '"Show my best LinkedIn post this month"', '"Why did yesterday\u2019s post fail?"', '"Turn off voice commands"'].map((c) => <div key={c} className="glass rounded-lg px-3 py-2 text-sm text-muted-foreground font-grotesk">{c}</div>)}</div></Panel>
+      <Panel className="p-5"><h3 className="font-display font-semibold mb-3">Voice Commands</h3><div className="grid sm:grid-cols-2 gap-2">{['"Hey Jarvis, open social"', '"Hey Jarvis, open analytics"', '"Hey Jarvis, open the blog engine"', '"Hey Jarvis, open news radar"', '"Hey Jarvis, open calendar"', '"Hey Jarvis, turn off voice commands"'].map((c) => <div key={c} className="glass rounded-lg px-3 py-2 text-sm text-muted-foreground font-grotesk">{c}</div>)}</div></Panel>
     </div>
   )
 }
@@ -902,7 +1199,7 @@ function AssistantView() {
 // ================================================================== AUDIT
 function AuditView() {
   const [logs, setLogs] = useState([])
-  useEffect(() => { api('/audit').then((r) => setLogs(r.logs)).catch(() => {}) }, [])
+  useEffect(() => { api('/audit').then((r) => setLogs(safeArr(r.logs))).catch(() => {}) }, [])
   const icons = { 'auth.login': Fingerprint, 'social.publish': Send, 'social.generate': Sparkles, 'integration.save': Save, 'integration.test': Play, 'brand.update': Brain }
   return (
     <div className="space-y-6">
@@ -935,7 +1232,7 @@ function BlogView() {
   const [pview, setPview] = useState('article')
   const [reviewing, setReviewing] = useState(null)
 
-  const load = useCallback(() => { api('/blog').then((r) => setPosts(r.posts)).catch(() => {}) }, [])
+  const load = useCallback(() => { api('/blog').then((r) => setPosts(safeArr(r.posts))).catch(() => {}) }, [])
   useEffect(() => { load() }, [load])
 
   const generate = async () => {
@@ -1106,9 +1403,17 @@ function NewsView({ go }) {
   const [items, setItems] = useState([])
   const [scanning, setScanning] = useState(false)
   const [filter, setFilter] = useState('All')
+  const [cfg, setCfg] = useState(null)
+  const [showCfg, setShowCfg] = useState(false)
 
-  const load = useCallback(() => { api('/news').then((r) => setItems(r.items)).catch(() => {}) }, [])
-  useEffect(() => { load() }, [load])
+  const load = useCallback(() => { api('/news').then((r) => setItems(safeArr(r.items))).catch(() => {}) }, [])
+  const loadCfg = useCallback(() => api('/news/config').then((r) => setCfg(r.config)).catch(() => {}), [])
+  useEffect(() => { load(); loadCfg() }, [load, loadCfg])
+
+  const saveCfg = async () => {
+    try { await api('/news/config', { method: 'PUT', body: JSON.stringify({ config: cfg }) }); toast.success('News Radar config saved'); setShowCfg(false) }
+    catch (e) { toast.error(e.message) }
+  }
 
   const scan = async () => {
     setScanning(true)
@@ -1138,7 +1443,35 @@ function NewsView({ go }) {
         <Button onClick={scan} disabled={scanning} className="bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90">
           {scanning ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Scanning feeds…</> : <><Radar className="h-4 w-4 mr-2" /> Scan for opportunities</>}
         </Button>
+        <Button variant="outline" className="border-white/10" onClick={() => setShowCfg(v => !v)}><Settings2 className="h-4 w-4 mr-2" /> Configure</Button>
       </div>
+
+      {showCfg && cfg && (
+        <Panel className="p-4 space-y-3">
+          <h3 className="font-display font-semibold text-sm flex items-center gap-2"><Settings2 className="h-4 w-4 text-blue-400" /> News Radar Config</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <label className="text-xs text-muted-foreground">Scan interval (min)
+              <input type="number" value={cfg.intervalMinutes ?? 60} onChange={(e) => setCfg({ ...cfg, intervalMinutes: Number(e.target.value) })} className="w-full mt-1 bg-secondary/50 border border-white/10 rounded-md px-2 py-1.5 text-sm text-foreground" />
+            </label>
+            <label className="text-xs text-muted-foreground">Quality threshold
+              <input type="number" value={cfg.qualityThreshold ?? 55} onChange={(e) => setCfg({ ...cfg, qualityThreshold: Number(e.target.value) })} className="w-full mt-1 bg-secondary/50 border border-white/10 rounded-md px-2 py-1.5 text-sm text-foreground" />
+            </label>
+            <label className="text-xs text-muted-foreground">Max age (hours)
+              <input type="number" value={cfg.maxAgeHours ?? 48} onChange={(e) => setCfg({ ...cfg, maxAgeHours: Number(e.target.value) })} className="w-full mt-1 bg-secondary/50 border border-white/10 rounded-md px-2 py-1.5 text-sm text-foreground" />
+            </label>
+            <div className="text-xs text-muted-foreground">Approval required
+              <label className="flex items-center gap-2 mt-2 text-sm text-foreground"><input type="checkbox" checked={cfg.approvalRequired !== false} onChange={(e) => setCfg({ ...cfg, approvalRequired: e.target.checked })} className="accent-blue-500" /> Nothing generates w/o approval</label>
+            </div>
+          </div>
+          <label className="text-xs text-muted-foreground block">Sources (RSS urls or keyword searches, one per line — 'Google News' is built-in)
+            <textarea rows={2} value={safeArr(cfg.sources).join('\n')} onChange={(e) => setCfg({ ...cfg, sources: e.target.value.split('\n').map(s => s.trim()).filter(Boolean) })} className="w-full mt-1 bg-secondary/50 border border-white/10 rounded-md px-2 py-1.5 text-sm text-foreground" />
+          </label>
+          <div className="flex gap-2">
+            <Button size="sm" className="bg-blue-600 hover:bg-blue-500" onClick={saveCfg}><Check className="h-3.5 w-3.5 mr-1" /> Save config</Button>
+            <Button size="sm" variant="ghost" onClick={() => setShowCfg(false)}>Cancel</Button>
+          </div>
+        </Panel>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {['All', 'Pending', 'Saved', 'Generated', 'Ignored'].map((f) => (
@@ -1157,12 +1490,22 @@ function NewsView({ go }) {
             </div>
             <a href={it.link} target="_blank" rel="noreferrer" className="font-grotesk font-semibold hover:text-blue-400 transition flex items-start gap-1">{it.headline}<ExternalLink className="h-3.5 w-3.5 text-muted-foreground mt-1 shrink-0" /></a>
             {it.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{it.description}</p>}
+            {it.recommendation?.worthCreating && (
+              <p className="text-[11px] text-blue-300/90 mt-1.5 line-clamp-2">🧠 {it.recommendation.whyItMatters}</p>
+            )}
+            {it.recommendation?.contentAngle && (
+              <p className="text-[11px] text-violet-300/90 mt-0.5 line-clamp-2">🎯 {it.recommendation.contentAngle}</p>
+            )}
             <div className="flex flex-wrap items-center gap-2 mt-3 text-[11px]">
               <span className="text-muted-foreground font-code">Relevance {it.score?.relevance}</span>
-              <span className="text-muted-foreground font-code">Impact {it.score?.impact}</span>
-              <span className="text-muted-foreground font-code">SEO {it.score?.seoOpportunity}</span>
+              <span className="text-muted-foreground font-code">Trend {it.score?.trendScore}</span>
               <span className="text-muted-foreground font-code">Virality {it.score?.virality}</span>
+              <span className="text-muted-foreground font-code">SEO {it.score?.seoOpportunity}</span>
+              <span className="text-muted-foreground font-code">Audience {it.score?.audienceMatch}</span>
+              <span className="text-muted-foreground font-code">Educational {it.score?.educationalValue}</span>
+              <span className="text-muted-foreground font-code">Brand {it.score?.brandMatch}</span>
               <span className="font-metric text-blue-400">Score {it.score?.overall}</span>
+              {it.bestFormat && <span className="px-2 py-0.5 rounded-full border border-emerald-500/30 text-emerald-400">Best: {it.bestFormat}</span>}
               <div className="flex gap-1 ml-auto">{it.score?.formats?.map((f) => <span key={f} className="px-2 py-0.5 rounded-full border border-white/10 text-muted-foreground">{f}</span>)}</div>
             </div>
             {it.status === 'Pending' && (
@@ -1193,7 +1536,7 @@ function SeasonalView() {
 
   const load = useCallback(() => {
     api('/seasonal/calendar').then((r) => setEvents(r.events)).catch(() => {})
-    api('/seasonal').then((r) => setCampaigns(r.campaigns)).catch(() => {})
+    api('/seasonal').then((r) => setCampaigns(safeArr(r.campaigns))).catch(() => {})
   }, [])
   useEffect(() => { load() }, [load])
 
@@ -1373,7 +1716,7 @@ function RepurposeView() {
 
   const load = useCallback(() => {
     api('/social').then((r) => setPosts(r.posts.filter((p) => p.status === 'Published'))).catch(() => {})
-    api('/repurpose').then((r) => setItems(r.items)).catch(() => {})
+    api('/repurpose').then((r) => setItems(safeArr(r.items))).catch(() => {})
   }, [])
   useEffect(() => { load() }, [load])
 
@@ -1462,7 +1805,7 @@ function EngageView() {
   const [draft, setDraft] = useState(null)
   const [busy, setBusy] = useState(false)
 
-  const load = useCallback(() => { api('/engage').then((r) => setComments(r.comments)).catch(() => {}) }, [])
+  const load = useCallback(() => { api('/engage').then((r) => setComments(safeArr(r.comments))).catch(() => {}) }, [])
   useEffect(() => { load() }, [load])
 
   const find = async () => {
@@ -1547,7 +1890,7 @@ function NewsletterView() {
 
   const load = useCallback(() => {
     api('/newsletter/subscribers').then(setStats).catch(() => {})
-    api('/newsletter/campaigns').then((r) => setCampaigns(r.campaigns)).catch(() => {})
+    api('/newsletter/campaigns').then((r) => setCampaigns(safeArr(r.campaigns))).catch(() => {})
     api('/blog').then((r) => setBlogs(r.posts)).catch(() => {})
   }, [])
   useEffect(() => { load() }, [load])
@@ -1653,7 +1996,7 @@ function CostView() {
       {d.alerts.length > 0 && (
         <Panel className="p-4 border-amber-500/30 glow-amber">
           <h3 className="font-display font-semibold mb-2 flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-amber-400" /> Budget alerts</h3>
-          {d.alerts.map((a) => <div key={a.type + a.id} className={`text-sm ${a.over ? 'text-red-400' : 'text-amber-400'}`}>{a.type === 'provider' ? 'Provider' : 'Module'} <span className="font-metric">{a.id}</span>: ${a.usage.toFixed(4)} of ${a.cap} cap — {a.over ? 'OVER — paused' : 'near cap'}</div>)}
+          {(d.alerts || []).map((a) => <div key={a.type + a.id} className={`text-sm ${a.over ? 'text-red-400' : 'text-amber-400'}`}>{a.type === 'provider' ? 'Provider' : 'Module'} <span className="font-metric">{a.id}</span>: ${a.usage.toFixed(4)} of ${a.cap} cap — {a.over ? 'OVER — paused' : 'near cap'}</div>)}
         </Panel>
       )}
 
@@ -1780,7 +2123,7 @@ function CalendarView() {
   const [items, setItems] = useState([])
   const [filter, setFilter] = useState('All')
 
-  const load = useCallback(() => { api('/calendar').then((r) => setItems(r.items)).catch(() => {}) }, [])
+  const load = useCallback(() => { api('/calendar').then((r) => setItems(safeArr(r.items))).catch(() => {}) }, [])
   useEffect(() => { load() }, [load])
 
   const resched = async (it, date) => {
@@ -2233,12 +2576,12 @@ function MissionControlView() {
         <TabsContent value="posts" className="pt-6 space-y-6">
           <div className="grid lg:grid-cols-2 gap-6">
             <Panel className="p-5"><h3 className="font-display font-semibold mb-3 flex items-center gap-2"><Star className="h-4 w-4 text-amber-400" /> Best Performers</h3>
-              <div className="space-y-2">{d.best.map((b) => (
+              <div className="space-y-2">{(d.best || []).map((b) => (
                 <div key={b.id} className="flex items-center gap-3 glass rounded-lg p-3"><ScoreRing value={b.score} size={48} /><div className="flex-1 min-w-0"><div className="font-grotesk text-sm truncate">{b.title}</div><div className="text-xs text-muted-foreground">{b.pillar}</div></div></div>
               ))}{!d.best.length && <p className="text-sm text-muted-foreground py-4 text-center">No high-scoring posts yet.</p>}</div>
             </Panel>
             <Panel className="p-5"><h3 className="font-display font-semibold mb-3 flex items-center gap-2"><TrendingUp className="h-4 w-4 text-red-400" /> Needs Attention</h3>
-              <div className="space-y-2">{d.worst.map((w) => (
+              <div className="space-y-2">{(d.worst || []).map((w) => (
                 <div key={w.id} className="flex items-center gap-3 glass rounded-lg p-3"><ScoreRing value={w.score} size={48} /><div className="flex-1 min-w-0"><div className="font-grotesk text-sm truncate">{w.title}</div><div className="text-xs text-muted-foreground">{w.pillar}</div></div></div>
               ))}{!d.worst.length && <p className="text-sm text-muted-foreground py-4 text-center">No underperformers.</p>}</div>
             </Panel>
@@ -2247,7 +2590,7 @@ function MissionControlView() {
 
         <TabsContent value="hashtags" className="pt-6">
           <Panel className="p-5"><h3 className="font-display font-semibold mb-4">Hashtag Intelligence</h3>
-            <div className="flex flex-wrap gap-2">{d.hashtags.map((h) => (
+            <div className="flex flex-wrap gap-2">{(d.hashtags || []).map((h) => (
               <Badge key={h.tag} variant="outline" className="border-blue-500/30 text-blue-400 gap-1.5 px-3 py-1.5"><Hash className="h-3 w-3" />{h.tag}<span className="text-muted-foreground ml-1">×{h.count}</span></Badge>
             ))}{!d.hashtags.length && <p className="text-sm text-muted-foreground">No hashtag data yet.</p>}</div>
           </Panel>
@@ -2311,168 +2654,10 @@ function VersionsView() {
   )
 }
 
-// ================================================================== AUTOPILOT 24/7
+// ================================================================== AUTOPILOT 24/7 — MISSION CONTROL
+import MissionControl from '@/components/mission-control'
 function AutopilotView() {
-  const [cfg, setCfg] = useState(null)
-  const [saving, setSaving] = useState(false)
-  const [running, setRunning] = useState(false)
-
-  const load = useCallback(() => { api('/autopilot').then((r) => setCfg(r.config || DEFAULT_AUTOPILOT)).catch(() => {}) }, [])
-  useEffect(() => { load() }, [load])
-
-  const save = async () => {
-    setSaving(true)
-    try { await api('/autopilot', { method: 'PUT', body: JSON.stringify({ cfg }) }); toast.success('Auto-Pilot config saved') }
-    catch (e) { toast.error(e.message) } finally { setSaving(false) }
-  }
-
-  const runNow = async () => {
-    try { const r = await api('/autopilot/run', { method: 'POST' }); toast.success('Auto-Pilot triggered', { description: `Social draft ${r.social?.id?.slice(0, 8)} created` }) }
-    catch (e) { toast.error(e.message) }
-  }
-
-  const update = (module, key, value) => setCfg((c) => ({ ...c, [module]: { ...c[module], [key]: value } }))
-  const toggleModule = (module) => setCfg((c) => ({ ...c, [module]: { ...c[module], enabled: !c[module]?.enabled } }))
-
-  if (!cfg) return <Loading />
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-bold flex items-center gap-2"><Zap className="h-6 w-6 text-amber-400" /> Auto-Pilot 24/7</h1>
-          <p className="text-sm text-muted-foreground">Fully automated content lifecycle — generate → Discord approval → publish → archive. Runs around the clock.</p>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={runNow} variant="outline" className="border-white/10"><Play className="h-4 w-4 mr-2" /> Run Now</Button>
-          <Button onClick={save} disabled={saving} className="bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Save className="h-4 w-4 mr-2" /> Save</>}</Button>
-        </div>
-      </div>
-
-      <Panel className="p-5 glow-amber">
-        <div className="flex items-start gap-4">
-          <div className="h-10 w-10 shrink-0 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 grid place-items-center"><Zap className="h-5 w-5 text-white" /></div>
-          <div>
-            <h3 className="font-display font-semibold mb-1">How Auto-Pilot works</h3>
-            <p className="text-sm text-muted-foreground leading-relaxed">On schedule, the system picks the oldest Drive image (FIFO) → AI vision + research → platform-native drafts → quality check → saves to Sheets → sends Discord approval card. You approve from Discord or PWA → it publishes, archives the image, and logs everything. The n8n workflows (in <span className="font-code text-blue-400">/n8n-workflows</span>) run these schedules 24/7 on your VPS.</p>
-          </div>
-        </div>
-      </Panel>
-
-      {/* Social Automation */}
-      <Panel className="p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-display font-semibold flex items-center gap-2"><Sparkles className="h-4 w-4 text-blue-400" /> Social Automation</h3>
-          <Switch checked={cfg.social?.enabled} onCheckedChange={() => toggleModule('social')} />
-        </div>
-        {cfg.social?.enabled && (
-          <div className="grid sm:grid-cols-3 gap-4">
-            <Field label="Posts per day">
-              <select value={cfg.social.timesPerDay} onChange={(e) => update('social', 'timesPerDay', Number(e.target.value))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm">
-                <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option><option value={4}>4</option>
-              </select>
-            </Field>
-            <Field label="Morning post">
-              <input type="time" value={cfg.social.times?.[0] || '09:00'} onChange={(e) => update('social', 'times', [e.target.value, cfg.social.times?.[1] || '17:00'])} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm font-code" />
-            </Field>
-            <Field label="Evening post">
-              <input type="time" value={cfg.social.times?.[1] || '17:00'} onChange={(e) => update('social', 'times', [cfg.social.times?.[0] || '09:00', e.target.value])} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm font-code" />
-            </Field>
-          </div>
-        )}
-      </Panel>
-
-      {/* Blog Automation */}
-      <Panel className="p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-display font-semibold flex items-center gap-2"><FileText className="h-4 w-4 text-violet-400" /> Blog Engine</h3>
-          <Switch checked={cfg.blog?.enabled} onCheckedChange={() => toggleModule('blog')} />
-        </div>
-        {cfg.blog?.enabled && (
-          <div className="grid sm:grid-cols-3 gap-4">
-            <Field label="Posts per week">
-              <select value={cfg.blog.timesPerWeek} onChange={(e) => update('blog', 'timesPerWeek', Number(e.target.value))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm">
-                <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option><option value={5}>5</option>
-              </select>
-            </Field>
-            <Field label="Publish day">
-              <select value={cfg.blog.days?.join(',') || '1,3,5'} onChange={(e) => update('blog', 'days', e.target.value.split(',').map(Number))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm">
-                <option value="1,3,5">Mon, Wed, Fri</option><option value="1,4">Mon, Thu</option><option value="2,5">Tue, Fri</option><option value="1,2,3,4,5">Weekdays</option>
-              </select>
-            </Field>
-            <Field label="Publish time">
-              <input type="time" value={cfg.blog.time || '10:00'} onChange={(e) => update('blog', 'time', e.target.value)} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm font-code" />
-            </Field>
-          </div>
-        )}
-      </Panel>
-
-      {/* LinkedIn Engagement */}
-      <Panel className="p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-display font-semibold flex items-center gap-2"><MessageSquare className="h-4 w-4 text-blue-400" /> LinkedIn Auto-Comment</h3>
-          <Switch checked={cfg.linkedin?.enabled} onCheckedChange={() => toggleModule('linkedin')} />
-        </div>
-        {cfg.linkedin?.enabled && (
-          <div className="grid sm:grid-cols-2 gap-4">
-            <Field label="Comments per day">
-              <input type="number" min="1" max="20" value={cfg.linkedin.commentsPerDay || 5} onChange={(e) => update('linkedin', 'commentsPerDay', Number(e.target.value))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm font-code" />
-            </Field>
-            <Field label="Topics (comma separated)">
-              <input value={(cfg.linkedin.topics || []).join(', ')} onChange={(e) => update('linkedin', 'topics', e.target.value.split(',').map((s) => s.trim()))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm" />
-            </Field>
-          </div>
-        )}
-      </Panel>
-
-      {/* News + Newsletter */}
-      <div className="grid lg:grid-cols-2 gap-6">
-        <Panel className="p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-semibold flex items-center gap-2"><Radar className="h-4 w-4 text-emerald-400" /> News Radar</h3>
-            <Switch checked={cfg.news?.enabled} onCheckedChange={() => toggleModule('news')} />
-          </div>
-          {cfg.news?.enabled && (
-            <div className="space-y-3">
-              <Field label="Scan interval (minutes)">
-                <input type="number" min="15" step="15" value={cfg.news.intervalMinutes || 120} onChange={(e) => update('news', 'intervalMinutes', Number(e.target.value))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm font-code" />
-              </Field>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Check className="h-3 w-3 text-emerald-400" /> Auto-generate social from top news</div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Check className="h-3 w-3 text-emerald-400" /> Auto-generate blog from top news</div>
-            </div>
-          )}
-        </Panel>
-        <Panel className="p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-semibold flex items-center gap-2"><Mail className="h-4 w-4 text-amber-400" /> Newsletter</h3>
-            <Switch checked={cfg.newsletter?.enabled} onCheckedChange={() => toggleModule('newsletter')} />
-          </div>
-          {cfg.newsletter?.enabled && (
-            <div className="space-y-3">
-              <Field label="Send day">
-                <select value={cfg.newsletter.day || 5} onChange={(e) => update('newsletter', 'day', Number(e.target.value))} className="w-full bg-secondary/50 border border-white/10 rounded-lg px-3 h-10 text-sm">
-                  <option value="1">Monday</option><option value="3">Wednesday</option><option value="5">Friday</option>
-                </select>
-              </Field>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Check className="h-3 w-3 text-emerald-400" /> Auto-converts approved blogs to newsletter</div>
-            </div>
-          )}
-        </Panel>
-      </div>
-
-      <Panel className="p-5">
-        <h3 className="font-display font-semibold mb-3 flex items-center gap-2"><Github className="h-4 w-4 text-blue-400" /> GitHub Actions 24/7 Triggers</h3>
-        <p className="text-xs text-muted-foreground mb-3">These workflows run on GitHub's infrastructure — no n8n or VPS needed. Set the secrets in <span className="font-code text-blue-400">Settings → Secrets → Actions</span>:</p>
-        <div className="grid sm:grid-cols-2 gap-3">
-          <div className="glass rounded-lg p-3"><div className="text-sm font-grotesk">social-automation.yml</div><div className="text-xs text-muted-foreground">9 AM + 5 PM → auto-generate social post</div></div>
-          <div className="glass rounded-lg p-3"><div className="text-sm font-grotesk">blog-automation.yml</div><div className="text-xs text-muted-foreground">Mon/Wed/Fri → auto-generate blog</div></div>
-          <div className="glass rounded-lg p-3"><div className="text-sm font-grotesk">scheduler.yml</div><div className="text-xs text-muted-foreground">Every 30 min → publish scheduled + scan news</div></div>
-          <div className="glass rounded-lg p-3"><div className="text-sm font-grotesk">daily-automation.yml</div><div className="text-xs text-muted-foreground">8 AM → full pipeline run</div></div>
-        </div>
-        <p className="text-xs text-muted-foreground mt-3">Required secrets: <span className="font-code">APP_URL</span>, <span className="font-code">NEXUS_API_TOKEN</span>, <span className="font-code">NEXUS_CRON_TOKEN</span>, <span className="font-code">DISCORD_WEBHOOK</span></p>
-      </Panel>
-    </div>
-  )
+  return <MissionControl go={(v) => { if (typeof window !== 'undefined') history.replaceState(null, '', v === 'dashboard' ? '/' : `/#${v}`); window.dispatchEvent(new HashChangeEvent('hashchange')) }} />
 }
 
 // ================================================================== LEARNING ENGINE
@@ -2570,6 +2755,9 @@ function Shell({ user, onLogout }) {
   const [view, setView] = useState(() => (typeof window !== 'undefined' && window.location.hash === '#integrations' ? 'integrations' : 'dashboard'))
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [voiceEnabled, setVoiceEnabled] = useState(false)
+  const [wakeWord, setWakeWord] = useState('Hey Jarvis')
+  const [honorific, setHonorific] = useState('Boss')
   const go = (v) => { setView(v); setMobileOpen(false); if (typeof window !== 'undefined') history.replaceState(null, '', v === 'dashboard' ? '/' : `/#${v}`) }
 
   const render = () => {
@@ -2591,7 +2779,7 @@ function Shell({ user, onLogout }) {
       case 'recruiter': return <RecruiterView />
       case 'portfolio': return <PortfolioView />
       case 'integrations': return <IntegrationsView />
-      case 'assistant': return <AssistantView />
+      case 'assistant': return <AssistantView voiceEnabled={voiceEnabled} setVoiceEnabled={setVoiceEnabled} wakeWord={wakeWord} setWakeWord={setWakeWord} honorific={honorific} setHonorific={setHonorific} />
       case 'audit': return <AuditView />
       case 'scheduler': return <SchedulerView />
       case 'discord': return <DiscordView />
@@ -2650,6 +2838,13 @@ function Shell({ user, onLogout }) {
         )}
       </AnimatePresence>
 
+      <VoiceAssistant
+        enabled={voiceEnabled}
+        wakeWord={wakeWord}
+        honorific={honorific}
+        go={go}
+        onStatus={setVoiceEnabled}
+      />
       <div className="flex-1 flex flex-col min-w-0">
         {/* topbar */}
         <header className="h-16 glass-strong border-b border-white/5 flex items-center gap-3 px-4 sticky top-0 z-30">
@@ -2672,7 +2867,7 @@ function Shell({ user, onLogout }) {
         <main className="flex-1 p-4 md:p-6 overflow-x-hidden">
           <AnimatePresence mode="wait">
             <motion.div key={view} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
-              {render()}
+              <ErrorBoundary key={view}>{render()}</ErrorBoundary>
             </motion.div>
           </AnimatePresence>
         </main>
@@ -2682,6 +2877,28 @@ function Shell({ user, onLogout }) {
   )
 }
 
+// ================================================================== Error Boundary
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null } }
+  static getDerivedStateFromError(error) { return { hasError: true, error } }
+  componentDidCatch(error, info) { console.error('View Error:', error, info) }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen grid place-items-center p-8">
+          <div className="glass rounded-xl p-8 max-w-md text-center">
+            <div className="h-12 w-12 rounded-lg bg-red-500/20 grid place-items-center mx-auto mb-4"><ShieldAlert className="h-6 w-6 text-red-400" /></div>
+            <h2 className="font-display text-xl font-bold mb-2">Something went wrong</h2>
+            <p className="text-sm text-muted-foreground mb-4">{String(this.state.error?.message || 'An error occurred')}</p>
+            <Button onClick={() => { this.setState({ hasError: false }); window.location.reload() }} className="bg-blue-600 hover:bg-blue-500">Reload Page</Button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 // ================================================================== ROOT
 function App() {
   const [user, setUser] = useState(() => {
@@ -2689,6 +2906,14 @@ function App() {
     try { const u = localStorage.getItem('nexus_user'); const t = localStorage.getItem('nexus_token'); return (u && t) ? JSON.parse(u) : null } catch { return null }
   })
   const [ready, setReady] = useState(false)
+  // Persist face verification in sessionStorage — survives page reloads / HMR /
+  // preview proxy refreshes that re-showed the FaceGate every few seconds.
+  const [faceVerified, setFaceVerified] = useState(() => {
+    if (typeof window === 'undefined') return false
+    try { return sessionStorage.getItem('nexus_face_verified') === 'true' } catch { return false }
+  })
+  const [showFace, setShowFace] = useState(false)
+  const markFace = (v) => { setFaceVerified(v); try { if (v) sessionStorage.setItem('nexus_face_verified', 'true'); else sessionStorage.removeItem('nexus_face_verified') } catch {} }
   useEffect(() => {
     const t = localStorage.getItem('nexus_token'); const u = localStorage.getItem('nexus_user')
     if (t && u) {
@@ -2699,9 +2924,18 @@ function App() {
     }
     setReady(true)
   }, [])
-  const logout = () => { localStorage.removeItem('nexus_token'); localStorage.removeItem('nexus_user'); setUser(null); toast.success('Session ended') }
+  // Face ID is verified ONCE per tab session and stored in sessionStorage —
+  // no focus/visibility re-prompting, and it survives page reloads/HMR/preview
+  // refreshes that were re-showing the gate every few seconds.
+  const logout = () => { try { sessionStorage.removeItem('nexus_face_verified') } catch {} localStorage.removeItem('nexus_token'); localStorage.removeItem('nexus_user'); setUser(null); setFaceVerified(false); toast.success('Session ended') }
   if (!ready) return <div className="min-h-screen grid-bg grid place-items-center"><Loader2 className="h-8 w-8 animate-spin text-blue-400" /></div>
   if (!user) return <Login onLogin={setUser} />
+  if (!faceVerified) {
+    return <FaceGate
+      onVerified={() => { markFace(true); setShowFace(false) }}
+      onSkip={() => { markFace(true); setShowFace(false) }}
+    />
+  }
   return <Shell user={user} onLogout={logout} />
 }
 

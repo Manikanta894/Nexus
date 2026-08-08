@@ -7,6 +7,7 @@ import * as discordLib from '@/lib/discord'
 import { fetchFeed, googleNewsFeeds } from '@/lib/rss'
 import { SEED_EVENTS } from '@/lib/events'
 import { estimateCost, DEFAULT_BUDGET_CAPS } from '@/lib/pricing'
+import { timeAgo, formatUptime, computeNextTask, formatActivity, buildWarnings } from '@/lib/watchdog'
 
 // ----------------------------- Mongo -----------------------------
 let client
@@ -405,6 +406,8 @@ const DEFAULT_BRAND = {
 const DEFAULT_ASSISTANT = { wakeWord: 'Hey Jarvis', honorific: 'Boss', voiceEnabled: true, lastToggled: null }
 
 async function seed(db) {
+  const sys = await db.collection('config').findOne({ key: 'system' })
+  if (!sys) await db.collection('config').insertOne({ key: 'system', installedAt: new Date().toISOString() })
   const existing = await db.collection('brand').findOne({ id: 'brand' })
   if (!existing) await db.collection('brand').insertOne({ id: 'brand', data: DEFAULT_BRAND, updatedAt: new Date().toISOString() })
   const a = await db.collection('assistant').findOne({ id: 'assistant' })
@@ -554,6 +557,7 @@ async function drivePick(db) {
     const file = files.find((f) => !locked.has(f.id)) || null
     if (!file) return null
     await db.collection('drive_locks').insertOne({ id: uuidv4(), fileId: file.id, fileName: file.name, ts: new Date().toISOString() })
+    await audit(db, 'drive.pick', 'system', { fileId: file.id, fileName: file.name })
     return { file, thumbUrl: googleLib.driveThumbnail(file) }
   } catch (e) { console.error('drive pick failed:', e?.message); return null }
 }
@@ -964,6 +968,7 @@ async function handleRoute(request, { params }) {
   // ---- Public (works without DB) ----
   if (route === '/' || route === '/root') return json({ message: 'NEXUS API online', db: db ? 'connected' : 'disconnected' })
 
+  try {
     if (route === '/auth/login' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
       const U = process.env.ADMIN_USERNAME || 'admin'
@@ -998,9 +1003,126 @@ async function handleRoute(request, { params }) {
     }
     if (route === '/autopilot/run' && method === 'POST') {
       // Manual trigger: generate social + blog right now
-      const cfg = await db.collection('config').findOne({ key: 'autopilot' })
+      await audit(db, 'autopilot.run', actor, {})
       const socialRes = await runPipeline(db, { platforms: ['linkedin', 'instagram', 'facebook', 'threads'] }, actor)
       return json({ ok: true, social: { id: socialRes.id, status: socialRes.status } })
+    }
+
+    // ---- AUTOPILOT LIVE STATUS (watchers, heartbeat, counts, next task) ----
+    if (route === '/autopilot/status' && method === 'GET') {
+      const sys = await db.collection('config').findOne({ key: 'system' })
+      const installedAt = sys?.installedAt || new Date().toISOString()
+      await db.collection('config').updateOne({ key: 'system' }, { $set: { lastHeartbeat: new Date().toISOString() } }, { upsert: true })
+
+      const cfgDoc = await db.collection('config').findOne({ key: 'autopilot' })
+      const cfg = cfgDoc?.data || null
+
+      const [social, blog, integs, aiList] = await Promise.all([
+        db.collection('social_posts').find({}).toArray(),
+        db.collection('blog_posts').find({}).toArray(),
+        decorate(await db.collection('integrations').find({}).toArray()),
+        getConnectedAI(db),
+      ])
+
+      // Real Drive image count (best-effort — skips silently if not configured)
+      let imagesRemaining = null
+      const cfgDrive = await driveConfig(db)
+      if (cfgDrive.configured) {
+        try {
+          const files = await googleLib.driveList(cfgDrive.sa, cfgDrive.sourceFolderId)
+          const locked = new Set((await db.collection('drive_locks').find({}).toArray()).map((l) => l.fileId))
+          imagesRemaining = files.filter((f) => !locked.has(f.id)).length
+        } catch { imagesRemaining = null }
+      }
+
+      const todayStr = new Date().toISOString().slice(0, 10)
+      const isToday = (iso) => (iso || '').slice(0, 10) === todayStr
+      const publishedSocialToday = social.filter((p) => p.status === 'Published' && isToday(p.publishedAt)).length
+      const publishedBlogToday = blog.filter((p) => p.status === 'Published' && isToday(p.publishedAt)).length
+      const pendingSocial = social.filter((p) => p.status === 'Pending Approval')
+      const pendingBlog = blog.filter((p) => p.status === 'Pending Approval')
+      const jobsTodayLog = await db.collection('audit_log').countDocuments({ ts: { $gte: `${todayStr}T00:00:00.000Z` } })
+
+      const discordInteg = integs.find((i) => i.id === 'discord')
+      const driveInteg = integs.find((i) => i.id === 'google_drive')
+      const sheetsInteg = integs.find((i) => i.id === 'google_sheets')
+
+      // Current human-readable state — never "Idle"
+      let currentState = 'Watching for the next scheduled task…'
+      if (pendingSocial.length || pendingBlog.length) currentState = `Waiting on Discord approval — ${pendingSocial.length + pendingBlog.length} draft(s) in queue`
+      else if (imagesRemaining === 0) currentState = 'Social Source folder is empty — automation paused for image posts'
+      else if (cfgDrive.configured) currentState = `Watching Google Drive — ${imagesRemaining ?? '…'} image(s) available`
+
+      const watchers = [
+        { id: 'google_drive', name: 'Google Drive', status: !cfgDrive.configured ? 'disabled' : (imagesRemaining === 0 ? 'critical' : imagesRemaining <= 10 ? 'warning' : 'healthy'), detail: cfgDrive.configured ? `${imagesRemaining ?? '…'} images waiting in Source` : 'Not configured', lastChecked: new Date().toISOString() },
+        { id: 'google_sheets', name: 'Google Sheets', status: sheetsInteg?.status === 'connected' ? 'healthy' : sheetsInteg?.status === 'expired' ? 'critical' : 'disabled', detail: sheetsInteg?.status === 'connected' ? 'Syncing operational data' : 'Not connected', lastChecked: new Date().toISOString() },
+        { id: 'discord', name: 'Discord', status: discordInteg?.status === 'connected' ? 'healthy' : discordInteg?.status === 'expired' ? 'critical' : 'disabled', detail: discordInteg?.status === 'connected' ? 'Listening for approvals' : 'Not connected', lastChecked: new Date().toISOString() },
+        { id: 'ai', name: 'AI Providers', status: aiList.length === 0 ? 'critical' : 'healthy', detail: aiList.length ? `${aiList.length} provider(s) in fallback chain — primary: ${aiList[0]?.id}` : 'No provider connected — running demo mode', lastChecked: new Date().toISOString() },
+        { id: 'linkedin', name: 'LinkedIn', status: integs.find((i) => i.id === 'linkedin')?.status === 'connected' ? 'healthy' : 'disabled', detail: 'Monitoring publishing + engagement', lastChecked: new Date().toISOString() },
+        { id: 'scheduler', name: 'Scheduler', status: 'healthy', detail: cfg ? `Next: ${computeNextTask(cfg)?.label || 'no tasks configured'}` : 'No autopilot config saved yet', lastChecked: new Date().toISOString() },
+      ]
+
+      return json({
+        online: true,
+        installedAt,
+        uptime: formatUptime(installedAt),
+        lastHeartbeat: new Date().toISOString(),
+        currentState,
+        nextTask: cfg ? computeNextTask(cfg) : null,
+        watchers,
+        counts: {
+          imagesRemaining,
+          jobsToday: jobsTodayLog,
+          postsPublishedToday: publishedSocialToday,
+          blogsPublishedToday: publishedBlogToday,
+          pendingApprovals: pendingSocial.length + pendingBlog.length,
+          totalPublished: social.filter((p) => p.status === 'Published').length,
+          totalBlogPublished: blog.filter((p) => p.status === 'Published').length,
+        },
+      })
+    }
+
+    // ---- WATCHDOG (Reason / Impact / Fix warnings) ----
+    if (route === '/watchdog' && method === 'GET') {
+      const integs = decorate(await db.collection('integrations').find({}).toArray())
+      const aiList = await getConnectedAI(db)
+      const cfgDrive = await driveConfig(db)
+      let imagesRemaining = null
+      let lockedStuck = 0
+      if (cfgDrive.configured) {
+        try {
+          const files = await googleLib.driveList(cfgDrive.sa, cfgDrive.sourceFolderId)
+          const locks = await db.collection('drive_locks').find({}).toArray()
+          const locked = new Set(locks.map((l) => l.fileId))
+          imagesRemaining = files.filter((f) => !locked.has(f.id)).length
+          const staleCutoff = Date.now() - 30 * 60000 // locked > 30 min with no matching post = stuck
+          const socialFileIds = new Set((await db.collection('social_posts').find({}).toArray()).map((p) => p.driveFileId).filter(Boolean))
+          lockedStuck = locks.filter((l) => new Date(l.ts).getTime() < staleCutoff && !socialFileIds.has(l.fileId)).length
+        } catch { imagesRemaining = null }
+      }
+      const monthPrefix = new Date().toISOString().slice(0, 7)
+      const costDocs = await db.collection('ai_cost').find({ ts: { $gte: `${monthPrefix}-01` } }).toArray()
+      const spend = costDocs.reduce((s, c) => s + (c.costUsd || 0), 0)
+      const capsDoc = await db.collection('config').findOne({ key: 'budget_caps' })
+      const caps = capsDoc?.data || DEFAULT_BUDGET_CAPS
+      const totalCap = Object.values(caps.providers || {}).reduce((s, v) => s + v, 0) || 1
+      const budgetUsedPct = Math.round((spend / totalCap) * 100)
+
+      const pending = [...await db.collection('social_posts').find({ status: 'Pending Approval' }).toArray(), ...await db.collection('blog_posts').find({ status: 'Pending Approval' }).toArray()]
+      const oldestPendingHours = pending.length ? Math.round((Date.now() - Math.min(...pending.map((p) => new Date(p.createdAt).getTime()))) / 3600000) : null
+
+      const warnings = buildWarnings({
+        imagesRemaining, driveConfigured: cfgDrive.configured, integrations: integs,
+        aiConnectedCount: aiList.length, budgetUsedPct, oldestPendingHours, lockedStuck,
+      })
+      return json({ warnings })
+    }
+
+    // ---- LIVE ACTIVITY FEED ----
+    if (route === '/activity' && method === 'GET') {
+      const limit = Math.min(100, Number(new URL(request.url).searchParams.get('limit')) || 40)
+      const logs = await db.collection('audit_log').find({}).sort({ ts: -1 }).limit(limit).toArray()
+      return json({ activity: logs.map(formatActivity) })
     }
 
     // ---- Dashboard ----
@@ -1273,7 +1395,7 @@ async function handleRoute(request, { params }) {
       }
       if (body.action === 'generate_blog') {
         const job = await blogPipeline(db, { seedText: `${item.headline}. ${item.description ? item.description.slice(0, 600) : ''}`, newsSeed: item.headline }, actor)
-        await db.collection('news_opportunities').updateOne({ id: body.id }, { $set: { status: 'Generated', blogJobId: job.id, updatedAt: now } })
+        await db.collection('news_opportunities').updateOne({ id: body.id }, { $set: { status: 'Generated', blogJobId: blog.id, updatedAt: now } })
         return json({ blogJob: job })
       }
       return json({ error: 'Unknown action' }, 400)
