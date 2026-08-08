@@ -13,11 +13,24 @@ import { demoGenerate, qualityScores } from '../core/content.js'
 import { verifyInteractionRequest, interactionAck, INTERACTION_TYPES, sendApprovalCard, editInteractionMessage, buildEmbed, COLOR } from '../../../../../lib/discord.js'
 import { decrypt } from '../../../../../lib/social-post.js'
 
+// Discord approval webhook resolution: the saved (encrypted) integration field
+// takes priority; fall back to the DISCORD_WEBHOOK env var for persistence
+// across restarts / redeploys.
+function resolveDiscordWebhook(it) {
+  if (it?.fields?.webhookUrl) { try { return decrypt(it.fields.webhookUrl) } catch {} }
+  return process.env.DISCORD_WEBHOOK || ''
+}
+
 export const routes = {
+  // Resolve the Discord approval webhook: saved (encrypted) integration wins,
+  // otherwise fall back to the DISCORD_WEBHOOK env var — so the connection
+  // survives server restarts / redeploys even before the in-memory store is
+  // populated.
   'GET /discord': () => {
     const it = findIntegration('discord')
     const interactions = db.discord_interactions.slice(-20).reverse()
-    return json({ webhook: !!it?.fields?.webhookUrl, publicKey: !!it?.fields?.publicKey, interactionCount: db.discord_interactions.length, interactions })
+    const webhook = resolveDiscordWebhook(it)
+    return json({ webhook: !!webhook, publicKey: !!it?.fields?.publicKey || !!process.env.DISCORD_PUBLIC_KEY, interactionCount: db.discord_interactions.length, interactions })
   },
 
   'GET /discord/interactions': () => json({ interactions: db.discord_interactions.slice(-20).reverse() }),
@@ -61,7 +74,7 @@ export const routes = {
 
   'POST /discord/test': async ({ request }) => {
     const it = findIntegration('discord')
-    const wu = it?.fields?.webhookUrl ? decrypt(it.fields.webhookUrl) : ''
+    const wu = resolveDiscordWebhook(it)
     if (!wu) return json({ error: 'Discord webhook not configured' }, 400)
     const body = await request.json().catch(() => ({}))
     await sendApprovalCard(wu, { title: 'NEXUS test', description: body.message || 'Discord Hub is connected ✓', color: COLOR.info }).catch(e => { throw new Error(e.message) })
