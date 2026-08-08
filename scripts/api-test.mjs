@@ -111,6 +111,25 @@ async function test(name, fn) {
     const r = await req('/news/action', { method: 'POST', body: { id: newsId, action: 'generate_blog' } })
     return r.status === 200 && !!r.data.blogJob
   })
+  await test('news config get/put', async () => {
+    const g = await req('/news/config')
+    if (g.status !== 200 || !g.data.config) return false
+    const p = await req('/news/config', { method: 'PUT', body: { config: { qualityThreshold: 70 } } })
+    return p.status === 200 && p.data.config?.qualityThreshold === 70
+  })
+  await test('news generate_all (social+blog+newsletter)', async () => {
+    if (!newsId) return true
+    const r = await req('/news/action', { method: 'POST', body: { id: newsId, action: 'generate_all' } })
+    return r.status === 200 && !!r.data.socialJob && !!r.data.blogJob && !!r.data.newsletterCampaign
+  })
+  await test('news analytics', async () => {
+    const r = await req('/news/analytics')
+    return r.status === 200 && typeof r.data.opportunitiesFound === 'number' && typeof r.data.avgScore === 'number'
+  })
+  await test('news learning', async () => {
+    const r = await req('/news/learning')
+    return r.status === 200 && Array.isArray(r.data.bestTopics) && Array.isArray(r.data.recommendations)
+  })
 
   // Seasonal
   await test('seasonal calendar', async () => {

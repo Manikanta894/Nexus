@@ -14,7 +14,7 @@ import {
   Zap, Activity, ChevronLeft, Cpu, TrendingUp, Users, Eye, Send, Save, Trash2, Play,
   Star, Rocket, Newspaper, Mic, Fingerprint, Loader2, Copy, ExternalLink, Globe, Github,
   Triangle, Linkedin, Facebook, Instagram, MessageCircle, CircleDot, Layers, Award, ImageIcon,
-  Lock, Wand2, Plus, Filter, ShieldAlert, Wallet, BookOpen, Hash, ScanFace, ScanEye, ShieldCheck as ShieldIcon,
+  Lock, Wand2, Plus, Filter, ShieldAlert, Wallet, BookOpen, Hash, ScanFace, ScanEye, Settings2, ShieldCheck as ShieldIcon,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -1403,9 +1403,17 @@ function NewsView({ go }) {
   const [items, setItems] = useState([])
   const [scanning, setScanning] = useState(false)
   const [filter, setFilter] = useState('All')
+  const [cfg, setCfg] = useState(null)
+  const [showCfg, setShowCfg] = useState(false)
 
   const load = useCallback(() => { api('/news').then((r) => setItems(safeArr(r.items))).catch(() => {}) }, [])
-  useEffect(() => { load() }, [load])
+  const loadCfg = useCallback(() => api('/news/config').then((r) => setCfg(r.config)).catch(() => {}), [])
+  useEffect(() => { load(); loadCfg() }, [load, loadCfg])
+
+  const saveCfg = async () => {
+    try { await api('/news/config', { method: 'PUT', body: JSON.stringify({ config: cfg }) }); toast.success('News Radar config saved'); setShowCfg(false) }
+    catch (e) { toast.error(e.message) }
+  }
 
   const scan = async () => {
     setScanning(true)
@@ -1435,7 +1443,35 @@ function NewsView({ go }) {
         <Button onClick={scan} disabled={scanning} className="bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90">
           {scanning ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Scanning feeds…</> : <><Radar className="h-4 w-4 mr-2" /> Scan for opportunities</>}
         </Button>
+        <Button variant="outline" className="border-white/10" onClick={() => setShowCfg(v => !v)}><Settings2 className="h-4 w-4 mr-2" /> Configure</Button>
       </div>
+
+      {showCfg && cfg && (
+        <Panel className="p-4 space-y-3">
+          <h3 className="font-display font-semibold text-sm flex items-center gap-2"><Settings2 className="h-4 w-4 text-blue-400" /> News Radar Config</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <label className="text-xs text-muted-foreground">Scan interval (min)
+              <input type="number" value={cfg.intervalMinutes ?? 60} onChange={(e) => setCfg({ ...cfg, intervalMinutes: Number(e.target.value) })} className="w-full mt-1 bg-secondary/50 border border-white/10 rounded-md px-2 py-1.5 text-sm text-foreground" />
+            </label>
+            <label className="text-xs text-muted-foreground">Quality threshold
+              <input type="number" value={cfg.qualityThreshold ?? 55} onChange={(e) => setCfg({ ...cfg, qualityThreshold: Number(e.target.value) })} className="w-full mt-1 bg-secondary/50 border border-white/10 rounded-md px-2 py-1.5 text-sm text-foreground" />
+            </label>
+            <label className="text-xs text-muted-foreground">Max age (hours)
+              <input type="number" value={cfg.maxAgeHours ?? 48} onChange={(e) => setCfg({ ...cfg, maxAgeHours: Number(e.target.value) })} className="w-full mt-1 bg-secondary/50 border border-white/10 rounded-md px-2 py-1.5 text-sm text-foreground" />
+            </label>
+            <div className="text-xs text-muted-foreground">Approval required
+              <label className="flex items-center gap-2 mt-2 text-sm text-foreground"><input type="checkbox" checked={cfg.approvalRequired !== false} onChange={(e) => setCfg({ ...cfg, approvalRequired: e.target.checked })} className="accent-blue-500" /> Nothing generates w/o approval</label>
+            </div>
+          </div>
+          <label className="text-xs text-muted-foreground block">Sources (RSS urls or keyword searches, one per line — 'Google News' is built-in)
+            <textarea rows={2} value={safeArr(cfg.sources).join('\n')} onChange={(e) => setCfg({ ...cfg, sources: e.target.value.split('\n').map(s => s.trim()).filter(Boolean) })} className="w-full mt-1 bg-secondary/50 border border-white/10 rounded-md px-2 py-1.5 text-sm text-foreground" />
+          </label>
+          <div className="flex gap-2">
+            <Button size="sm" className="bg-blue-600 hover:bg-blue-500" onClick={saveCfg}><Check className="h-3.5 w-3.5 mr-1" /> Save config</Button>
+            <Button size="sm" variant="ghost" onClick={() => setShowCfg(false)}>Cancel</Button>
+          </div>
+        </Panel>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {['All', 'Pending', 'Saved', 'Generated', 'Ignored'].map((f) => (
@@ -1454,12 +1490,22 @@ function NewsView({ go }) {
             </div>
             <a href={it.link} target="_blank" rel="noreferrer" className="font-grotesk font-semibold hover:text-blue-400 transition flex items-start gap-1">{it.headline}<ExternalLink className="h-3.5 w-3.5 text-muted-foreground mt-1 shrink-0" /></a>
             {it.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{it.description}</p>}
+            {it.recommendation?.worthCreating && (
+              <p className="text-[11px] text-blue-300/90 mt-1.5 line-clamp-2">🧠 {it.recommendation.whyItMatters}</p>
+            )}
+            {it.recommendation?.contentAngle && (
+              <p className="text-[11px] text-violet-300/90 mt-0.5 line-clamp-2">🎯 {it.recommendation.contentAngle}</p>
+            )}
             <div className="flex flex-wrap items-center gap-2 mt-3 text-[11px]">
               <span className="text-muted-foreground font-code">Relevance {it.score?.relevance}</span>
-              <span className="text-muted-foreground font-code">Impact {it.score?.impact}</span>
-              <span className="text-muted-foreground font-code">SEO {it.score?.seoOpportunity}</span>
+              <span className="text-muted-foreground font-code">Trend {it.score?.trendScore}</span>
               <span className="text-muted-foreground font-code">Virality {it.score?.virality}</span>
+              <span className="text-muted-foreground font-code">SEO {it.score?.seoOpportunity}</span>
+              <span className="text-muted-foreground font-code">Audience {it.score?.audienceMatch}</span>
+              <span className="text-muted-foreground font-code">Educational {it.score?.educationalValue}</span>
+              <span className="text-muted-foreground font-code">Brand {it.score?.brandMatch}</span>
               <span className="font-metric text-blue-400">Score {it.score?.overall}</span>
+              {it.bestFormat && <span className="px-2 py-0.5 rounded-full border border-emerald-500/30 text-emerald-400">Best: {it.bestFormat}</span>}
               <div className="flex gap-1 ml-auto">{it.score?.formats?.map((f) => <span key={f} className="px-2 py-0.5 rounded-full border border-white/10 text-muted-foreground">{f}</span>)}</div>
             </div>
             {it.status === 'Pending' && (

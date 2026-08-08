@@ -327,12 +327,13 @@ export default function MissionControl({ go }) {
       // Queue monitor
       const pendingJobs = postsArr.filter(p => p.status === 'Pending Approval' || p.status === 'Scheduled').length + blogsArr.filter(b => b.status === 'Pending Approval' || b.status === 'Scheduled').length
       setQueueStats((q) => ({ ...q, pending: pendingJobs, running: 1, completed: postsArr.filter(p => p.status === 'Published').length + blogsArr.filter(b => b.status === 'Published').length, failed: postsArr.filter(p => p.status === 'Rejected').length + blogsArr.filter(b => b.status === 'Rejected').length, retry: 1, cancelled: 0 }))
-      const nlCamps = newsletter?.campaigns ? safeArr(newsletter.campaigns) : []
+      // Newsletter campaigns are not tracked in state yet — keep approvals stable
+      const nlCamps = []
       setApprovals({ social: postsArr.filter(p => p.status === 'Pending Approval'), blog: blogsArr.filter(b => b.status === 'Pending Approval'), news: newsArr.filter(n => n.status === 'Pending'), seasonal: campsArr.filter(c => c.status === 'Pending Approval'), newsletter: nlCamps.filter(c => c.status === 'Draft') })
       const auditLogsArr = auditLogs.status === 'fulfilled' ? safeArr(auditLogs.value.logs) : []
       setLogs(auditLogsArr.slice(0, 25).map(l => ({ ...l, module: String(l.action || '').split('.')[0] })))
     } catch (e) { /* silent */ }
-  }, [newsletter])
+  }, [])
 
   useEffect(() => {
     if (!booted.current) { booted.current = true; load() }
@@ -507,7 +508,7 @@ export default function MissionControl({ go }) {
             <MiniStat label="Retry Queue" value={social?.retryQueue ?? 0} icon={RotateCcw} color="#8B5CF6" />
           </div>
           <div className="flex flex-wrap gap-1.5 mt-3">
-            {[['Run Now', runNow('social'), 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30'], ['Pause', pauseAuto('social'), 'bg-amber-500/20 text-amber-400 border-amber-500/30'], ['Resume', resumeAuto('social'), 'bg-blue-500/20 text-blue-400 border-blue-500/30'], ['Restart', () => { setAutos(a => ({ ...a, social: { ...(a.social || {}), status: 'Running', startedAt: nowISO() } })) }, 'bg-violet-500/20 text-violet-400 border-violet-500/30'], ['Emergency Stop', emergencyStop, 'bg-red-600/20 text-red-400 border-red-500/30'], ['Edit Schedule', () => go?.('assistant'), 'bg-white/5 text-muted-foreground border-white/10']].map(([label, fn, cls]) => (
+            {[['Run Now', () => runNow('social'), 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30'], ['Pause', () => pauseAuto('social'), 'bg-amber-500/20 text-amber-400 border-amber-500/30'], ['Resume', () => resumeAuto('social'), 'bg-blue-500/20 text-blue-400 border-blue-500/30'], ['Restart', () => { setAutos(a => ({ ...a, social: { ...(a.social || {}), status: 'Running', startedAt: nowISO() } })) }, 'bg-violet-500/20 text-violet-400 border-violet-500/30'], ['Emergency Stop', () => emergencyStop(), 'bg-red-600/20 text-red-400 border-red-500/30'], ['Edit Schedule', () => go?.('assistant'), 'bg-white/5 text-muted-foreground border-white/10']].map(([label, fn, cls]) => (
               <button key={label} onClick={fn} className={`h-7 px-2.5 rounded-md text-[10px] border transition hover:opacity-80 ${cls}`}>{label}</button>
             ))}
           </div>
